@@ -7,7 +7,7 @@ import { z } from "zod";
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware - simplified for demo
   const getCurrentUser = async (req: any) => {
-    const telegramId = req.headers['x-telegram-id'] || 'demo_user';
+    const telegramId = req.headers['x-telegram-id'] || '123456789';
     return await storage.getUserByTelegramId(String(telegramId));
   };
 
@@ -23,21 +23,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const user = await storage.createUser(userData);
+      console.log('Created user:', user.id, 'telegramId:', user.telegramId);
       res.json(user);
     } catch (error) {
+      console.error('Error creating user:', error);
       res.status(400).json({ error: "Invalid user data" });
     }
   });
 
   app.get("/api/users/me", async (req, res) => {
     try {
-      const user = await getCurrentUser(req);
+      const telegramId = req.headers['x-telegram-id'] || '123456789';
+      console.log('Looking for user with telegramId:', telegramId);
+      const user = await storage.getUserByTelegramId(String(telegramId));
       if (!user) {
+        console.log('User not found with telegramId:', telegramId);
         res.status(404).json({ error: "User not found" });
         return;
       }
+      console.log('Found user:', user.id);
       res.json(user);
     } catch (error) {
+      console.error('Error getting user:', error);
       res.status(500).json({ error: "Failed to get user" });
     }
   });

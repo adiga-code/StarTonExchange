@@ -116,7 +116,9 @@ export class MemStorage implements IStorage {
   }
 
   async getUserByTelegramId(telegramId: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.telegramId === telegramId);
+    const user = Array.from(this.users.values()).find(user => user.telegramId === telegramId);
+    console.log('getUserByTelegramId:', telegramId, 'found:', !!user, 'total users:', this.users.size);
+    return user;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
@@ -136,6 +138,7 @@ export class MemStorage implements IStorage {
       createdAt: new Date(),
     };
     this.users.set(id, user);
+    console.log('Created and stored user:', id, 'telegramId:', user.telegramId, 'total users:', this.users.size);
     return user;
   }
 

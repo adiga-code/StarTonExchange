@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Star, Bitcoin } from "lucide-react";
+import { Star } from "lucide-react";
 import type { User } from "@shared/schema";
 
 interface BalanceCardProps {
@@ -21,15 +21,15 @@ export default function BalanceCard({ user }: BalanceCardProps) {
       <div className="bg-gradient-to-br from-[#4E7FFF]/20 to-purple-500/20 rounded-2xl p-6 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] backdrop-blur-sm border border-white/10 mb-6">
         <div className="text-center">
           <p className="text-gray-600 dark:text-gray-400 text-sm mb-2">Ваш баланс</p>
-          <div className="flex items-center justify-center space-x-6">
+          <div className="flex items-center justify-center">
             <motion.div 
               className="text-center"
               whileHover={{ scale: 1.05 }}
             >
               <div className="flex items-center justify-center space-x-2 mb-1">
-                <Star className="w-5 h-5 text-yellow-500" />
+                <Star className="w-6 h-6 text-yellow-500" />
                 <motion.span 
-                  className="text-2xl font-bold"
+                  className="text-3xl font-bold"
                   key={starsBalance}
                   initial={{ scale: 1 }}
                   animate={{ scale: [1, 1.1, 1] }}
@@ -38,19 +38,7 @@ export default function BalanceCard({ user }: BalanceCardProps) {
                   {starsBalance.toLocaleString()}
                 </motion.span>
               </div>
-              <p className="text-gray-600 dark:text-gray-400 text-xs">Stars</p>
-            </motion.div>
-            <motion.div 
-              className="text-center"
-              whileHover={{ scale: 1.05 }}
-            >
-              <div className="flex items-center justify-center space-x-2 mb-1">
-                <Bitcoin className="w-5 h-5 text-[#4E7FFF]" />
-                <span className="text-lg text-gray-600 dark:text-gray-400">
-                  В кошельке
-                </span>
-              </div>
-              <p className="text-gray-600 dark:text-gray-400 text-xs">TON Wallet</p>
+              <p className="text-gray-600 dark:text-gray-400 text-sm">Telegram Stars</p>
             </motion.div>
           </div>
           <motion.div 

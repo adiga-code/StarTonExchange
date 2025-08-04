@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useTelegram } from "@/hooks/use-telegram";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Copy, Share, Star, Bell, Palette, Plus, Minus, Wallet, CreditCard } from "lucide-react";
+import { Users, Copy, Share, Star, Bell, Palette, Plus, Minus, Wallet, CreditCard, History, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -219,6 +219,62 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           <div className="mt-2 text-xs text-gray-500 dark:text-gray-500">
             ID: {user?.telegramId || '123456789'}
           </div>
+        </div>
+      </motion.div>
+
+      {/* Transaction History */}
+      <motion.div 
+        className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.3 }}
+      >
+        <h3 className="text-lg font-semibold mb-4 flex items-center">
+          <History className="w-5 h-5 text-purple-500 mr-2" />
+          История покупок
+        </h3>
+        
+        <div className="space-y-3">
+          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
+                <Star className="w-5 h-5 text-yellow-500" />
+              </div>
+              <div>
+                <p className="font-medium">Покупка 100 звезд</p>
+                <p className="text-gray-600 dark:text-gray-400 text-sm">15 янв 2025, 14:30</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="font-semibold text-green-500">Успешно</p>
+              <p className="text-gray-600 dark:text-gray-400 text-sm">₽241.50</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                <Receipt className="w-5 h-5 text-[#4E7FFF]" />
+              </div>
+              <div>
+                <p className="font-medium">Покупка 0.5 TON</p>
+                <p className="text-gray-600 dark:text-gray-400 text-sm">14 янв 2025, 10:15</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="font-semibold text-green-500">Успешно</p>
+              <p className="text-gray-600 dark:text-gray-400 text-sm">₽220.76</p>
+            </div>
+          </div>
+          
+          <Button
+            onClick={() => hapticFeedback('light')}
+            variant="outline"
+            className="w-full mt-3 border-gray-200 dark:border-white/20 hover:bg-gray-50 dark:hover:bg-white/5"
+          >
+            <History className="w-4 h-4 mr-2" />
+            Показать всю историю
+          </Button>
         </div>
       </motion.div>
 
