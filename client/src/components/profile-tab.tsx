@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useTelegram } from "@/hooks/use-telegram";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Copy, Share, Star, Bell, Palette } from "lucide-react";
+import { Users, Copy, Share, Star, Bell, Palette, Plus, Minus, Wallet, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -178,12 +178,56 @@ export default function ProfileTab({ user }: ProfileTabProps) {
         </div>
       </motion.div>
 
-      {/* Settings */}
+      {/* Wallet Management */}
       <motion.div 
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.2 }}
+      >
+        <h3 className="text-lg font-semibold mb-4 flex items-center">
+          <Wallet className="w-5 h-5 text-[#4E7FFF] mr-2" />
+          Управление балансом
+        </h3>
+        
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <Button
+            onClick={() => hapticFeedback('light')}
+            className="bg-green-500 hover:bg-green-600 text-white py-3 rounded-lg flex items-center justify-center space-x-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Пополнить</span>
+          </Button>
+          <Button
+            onClick={() => hapticFeedback('light')}
+            variant="outline"
+            className="border-red-500 text-red-500 hover:bg-red-50 dark:hover:bg-red-950 py-3 rounded-lg flex items-center justify-center space-x-2"
+          >
+            <Minus className="w-4 h-4" />
+            <span>Вывести</span>
+          </Button>
+        </div>
+
+        <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-lg p-4 border border-white/10">
+          <div className="flex items-center space-x-2 mb-2">
+            <CreditCard className="w-4 h-4 text-[#4E7FFF]" />
+            <span className="font-semibold">Связанный кошелек</span>
+          </div>
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
+            TON покупки автоматически отправляются в ваш Telegram кошелек
+          </p>
+          <div className="mt-2 text-xs text-gray-500 dark:text-gray-500">
+            ID: {user?.telegramId || '123456789'}
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Settings */}
+      <motion.div 
+        className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.3 }}
       >
         <h3 className="text-lg font-semibold mb-4 flex items-center">
           <Palette className="w-5 h-5 text-gray-500 mr-2" />

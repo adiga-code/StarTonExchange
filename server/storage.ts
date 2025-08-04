@@ -166,7 +166,7 @@ export class MemStorage implements IStorage {
     const transaction: Transaction = {
       ...insertTransaction,
       id,
-      status: "pending",
+      status: insertTransaction.status || "pending",
       createdAt: new Date(),
     };
     this.transactions.set(id, transaction);
@@ -206,7 +206,7 @@ export class MemStorage implements IStorage {
     const task: Task = {
       ...insertTask,
       id,
-      isActive: true,
+      isActive: insertTask.isActive ?? true,
       createdAt: new Date(),
     };
     this.tasks.set(id, task);

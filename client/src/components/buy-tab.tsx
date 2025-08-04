@@ -93,6 +93,15 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           amount: parseFloat(amount),
           rubAmount: parseFloat(priceCalculation.totalPrice),
         });
+        
+        // Show success message based on currency type
+        if (selectedCurrency === 'ton') {
+          toast({
+            title: "TON отправлены!",
+            description: `${amount} TON отправлены в ваш Telegram кошелек`,
+          });
+        }
+        
         onHideLoading();
       } catch (error) {
         onHideLoading();

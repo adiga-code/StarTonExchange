@@ -8,7 +8,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware - simplified for demo
   const getCurrentUser = async (req: any) => {
     const telegramId = req.headers['x-telegram-id'] || 'demo_user';
-    return await storage.getUserByTelegramId(telegramId as string);
+    return await storage.getUserByTelegramId(String(telegramId));
   };
 
   // User routes
@@ -122,10 +122,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             totalStarsEarned: (user.totalStarsEarned || 0) + parseInt(amount),
           });
         } else if (currency === 'ton') {
-          const newBalance = parseFloat(user.tonBalance || "0") + parseFloat(amount);
-          await storage.updateUser(user.id, {
-            tonBalance: newBalance.toString(),
-          });
+          // TON is sent directly to user's Telegram wallet
+          // We don't store TON balance in our app
+          console.log(`Sending ${amount} TON to Telegram wallet of user ${user.telegramId}`);
+          // Here would be the integration with Fragment API or TON wallet
         }
       }, 2000);
       

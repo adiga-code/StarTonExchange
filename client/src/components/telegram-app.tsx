@@ -9,15 +9,13 @@ import BalanceCard from "./balance-card";
 import BuyTab from "./buy-tab";
 import TasksTab from "./tasks-tab";
 import ProfileTab from "./profile-tab";
-import AdminPanel from "./admin-panel";
 import LoadingModal from "./loading-modal";
-import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Shield } from "lucide-react";
+import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Coins, TrendingUp } from "lucide-react";
 
-type TabType = 'buy' | 'tasks' | 'profile';
+type TabType = 'buy' | 'earn' | 'sell' | 'profile';
 
 export default function TelegramApp() {
   const [currentTab, setCurrentTab] = useState<TabType>('buy');
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   
@@ -38,7 +36,7 @@ export default function TelegramApp() {
   });
 
   // Get current user data
-  const { data: currentUser, isLoading: userLoading } = useQuery({
+  const { data: currentUser, isLoading: userLoading } = useQuery<User>({
     queryKey: ['/api/users/me'],
     enabled: !!user,
   });
@@ -59,10 +57,6 @@ export default function TelegramApp() {
     setCurrentTab(tab);
   };
 
-  const handleAdminPanelToggle = () => {
-    hapticFeedback('medium');
-    setShowAdminPanel(!showAdminPanel);
-  };
 
   const showLoadingModal = (message: string) => {
     setLoadingMessage(message);
@@ -128,31 +122,6 @@ export default function TelegramApp() {
       <main className="pb-20">
         <BalanceCard user={currentUser} />
 
-        {/* Navigation Tabs */}
-        <div className="px-4 mb-6">
-          <div className="flex bg-gray-100 dark:bg-[#1A1A1C] rounded-xl p-1 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
-            {[
-              { id: 'buy', icon: ShoppingCart, label: 'Купить' },
-              { id: 'tasks', icon: CheckSquare, label: 'Задания' },
-              { id: 'profile', icon: User, label: 'Профиль' },
-            ].map((tab) => (
-              <motion.button
-                key={tab.id}
-                onClick={() => handleTabChange(tab.id as TabType)}
-                className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all flex items-center justify-center space-x-2 ${
-                  currentTab === tab.id
-                    ? 'bg-[#4E7FFF] text-white shadow-lg'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                }`}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <tab.icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-              </motion.button>
-            ))}
-          </div>
-        </div>
 
         {/* Tab Content */}
         <AnimatePresence mode="wait">
@@ -171,7 +140,19 @@ export default function TelegramApp() {
                 onHideLoading={hideLoadingModal}
               />
             )}
-            {currentTab === 'tasks' && <TasksTab user={currentUser} />}
+            {currentTab === 'earn' && <TasksTab user={currentUser} />}
+            {currentTab === 'sell' && (
+              <div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-6 shadow-lg text-center">
+                <TrendingUp className="w-12 h-12 text-[#4E7FFF] mx-auto mb-4" />
+                <h3 className="text-xl font-bold mb-2">Продажа</h3>
+                <p className="text-gray-600 dark:text-gray-400 mb-4">
+                  Функция продажи криптовалюты находится в разработке
+                </p>
+                <div className="text-sm text-gray-500 dark:text-gray-500">
+                  Скоро будет доступна возможность продать ваши TON и Stars
+                </div>
+              </div>
+            )}
             {currentTab === 'profile' && <ProfileTab user={currentUser} />}
           </motion.div>
         </AnimatePresence>
@@ -182,7 +163,8 @@ export default function TelegramApp() {
         <div className="flex items-center justify-around py-2">
           {[
             { id: 'buy', icon: ShoppingCart, label: 'Купить' },
-            { id: 'tasks', icon: CheckSquare, label: 'Задания' },
+            { id: 'earn', icon: Coins, label: 'Заработать' },
+            { id: 'sell', icon: TrendingUp, label: 'Продать' },
             { id: 'profile', icon: User, label: 'Профиль' },
           ].map((tab) => (
             <motion.button
@@ -200,23 +182,9 @@ export default function TelegramApp() {
               <span className="text-xs">{tab.label}</span>
             </motion.button>
           ))}
-          <motion.button
-            onClick={handleAdminPanelToggle}
-            className="flex flex-col items-center py-2 px-4 transition-colors text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <Shield className="w-5 h-5 mb-1" />
-            <span className="text-xs">Admin</span>
-          </motion.button>
         </div>
       </nav>
 
-      {/* Admin Panel */}
-      <AdminPanel 
-        isOpen={showAdminPanel} 
-        onClose={() => setShowAdminPanel(false)} 
-      />
 
       {/* Loading Modal */}
       <LoadingModal 

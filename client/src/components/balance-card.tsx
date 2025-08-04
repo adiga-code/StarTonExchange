@@ -8,8 +8,8 @@ interface BalanceCardProps {
 
 export default function BalanceCard({ user }: BalanceCardProps) {
   const starsBalance = user?.starsBalance || 0;
-  const tonBalance = parseFloat(user?.tonBalance || "0");
-  const totalRubValue = (starsBalance * 2.30) + (tonBalance * 420.50);
+  // TON balance is not stored locally, only shown for reference
+  const totalRubValue = starsBalance * 2.30;
 
   return (
     <motion.div 
@@ -46,17 +46,11 @@ export default function BalanceCard({ user }: BalanceCardProps) {
             >
               <div className="flex items-center justify-center space-x-2 mb-1">
                 <Bitcoin className="w-5 h-5 text-[#4E7FFF]" />
-                <motion.span 
-                  className="text-2xl font-bold"
-                  key={tonBalance}
-                  initial={{ scale: 1 }}
-                  animate={{ scale: [1, 1.1, 1] }}
-                  transition={{ duration: 0.3 }}
-                >
-                  {tonBalance.toFixed(2)}
-                </motion.span>
+                <span className="text-lg text-gray-600 dark:text-gray-400">
+                  В кошельке
+                </span>
               </div>
-              <p className="text-gray-600 dark:text-gray-400 text-xs">TON</p>
+              <p className="text-gray-600 dark:text-gray-400 text-xs">TON Wallet</p>
             </motion.div>
           </div>
           <motion.div 
@@ -65,7 +59,7 @@ export default function BalanceCard({ user }: BalanceCardProps) {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
-            <p className="text-gray-600 dark:text-gray-400 text-xs">Общая стоимость</p>
+            <p className="text-gray-600 dark:text-gray-400 text-xs">Стоимость звезд</p>
             <motion.p 
               className="text-lg font-semibold"
               key={totalRubValue}

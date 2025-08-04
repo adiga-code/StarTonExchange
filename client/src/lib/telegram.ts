@@ -90,7 +90,7 @@ export interface TelegramUser {
 
 export class TelegramWebApp {
   private static instance: TelegramWebApp;
-  public webApp: typeof window.Telegram.WebApp | null = null;
+  public webApp: any = null;
 
   private constructor() {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {

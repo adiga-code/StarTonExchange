@@ -12,7 +12,7 @@ export const users = pgTable("users", {
   starsBalance: integer("stars_balance").default(0),
   tonBalance: decimal("ton_balance", { precision: 18, scale: 8 }).default("0"),
   referralCode: varchar("referral_code").unique(),
-  referredBy: varchar("referred_by").references(() => users.id),
+  referredBy: varchar("referred_by"),
   totalStarsEarned: integer("total_stars_earned").default(0),
   totalReferralEarnings: integer("total_referral_earnings").default(0),
   tasksCompleted: integer("tasks_completed").default(0),
@@ -20,6 +20,11 @@ export const users = pgTable("users", {
   notificationsEnabled: boolean("notifications_enabled").default(true),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+// Add foreign key after table definition
+export const usersRelations = {
+  referredBy: users.referredBy
+};
 
 export const transactions = pgTable("transactions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
