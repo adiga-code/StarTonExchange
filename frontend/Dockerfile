@@ -27,7 +27,7 @@ EOF
 RUN npm install
 
 # Копируем минимальные файлы
-COPY vite.config.js .
+COPY vite.config.ts .
 COPY index.html .
 COPY src/ ./src/
 
