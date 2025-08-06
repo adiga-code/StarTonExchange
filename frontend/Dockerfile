@@ -5,8 +5,8 @@ WORKDIR /app
 # Копируем package.json
 COPY package*.json ./
 
-# Устанавливаем зависимости
-RUN npm ci --only=production
+# Устанавливаем ВСЕ зависимости (включая dev dependencies для сборки)
+RUN npm ci
 
 # Копируем исходный код
 COPY . .
@@ -17,11 +17,21 @@ RUN npm run build
 # Продакшн образ с nginx
 FROM nginx:alpine
 
+# Удаляем дефолтную конфигурацию nginx
+RUN rm /etc/nginx/conf.d/default.conf
+
 # Копируем собранные файлы
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Копируем конфигурацию nginx для SPA
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Создаем простую конфигурацию для контейнера
+RUN echo 'server { \
+    listen 80; \
+    root /usr/share/nginx/html; \
+    index index.html; \
+    location / { \
+        try_files $uri $uri/ /index.html; \
+    } \
+}' > /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 

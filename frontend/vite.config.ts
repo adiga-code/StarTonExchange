@@ -1,37 +1,37 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 export default defineConfig({
   plugins: [
     react(),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
+    // Убираем replit-специфичные плагины для продакшена
+    ...(process.env.NODE_ENV === "development" && process.env.REPL_ID
       ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer(),
-          ),
+          // Эти плагины только для replit разработки
         ]
       : []),
   ],
   resolve: {
     alias: {
-      "@": path.resolve(import.meta.dirname, "client", "src"),
-      "@shared": path.resolve(import.meta.dirname, "shared"),
-      "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+      "@": path.resolve(__dirname, "src"), // Исправлено для новой структуры
     },
   },
-  root: path.resolve(import.meta.dirname, "client"),
+  // Убираем root, так как теперь мы в папке frontend
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    outDir: "dist", // Исправлено - относительный путь
     emptyOutDir: true,
+    sourcemap: false,
+    minify: "terser",
   },
   server: {
-    fs: {
-      strict: true,
-      deny: ["**/.*"],
+    host: true,
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
     },
   },
 });
