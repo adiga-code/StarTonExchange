@@ -11,6 +11,7 @@ import TasksTab from "./tasks-tab";
 import ProfileTab from "./profile-tab";
 import LoadingModal from "./loading-modal";
 import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Coins, TrendingUp } from "lucide-react";
+import type { User as UserType } from "../../shared/schema";
 
 type TabType = 'buy' | 'earn' | 'sell' | 'profile';
 
@@ -36,7 +37,7 @@ export default function TelegramApp() {
   });
 
   // Get current user data
-  const { data: currentUser, isLoading: userLoading } = useQuery<User>({
+  const { data: currentUser, isLoading: userLoading } = useQuery<UserType>({
     queryKey: ['/api/users/me'],
     enabled: !!user,
   });
