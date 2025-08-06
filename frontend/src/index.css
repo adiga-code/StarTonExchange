@@ -24,16 +24,15 @@
   --ring: hsl(20, 14.3%, 4.1%);
   --radius: 0.5rem;
 
-  /* Custom dark theme colors */
-  --dark-bg: hsl(225, 6%, 6%);
-  --card-dark: hsl(240, 4%, 11%);
-  --accent-blue: hsl(218, 100%, 65%);
-  --accent-blue-hover: hsl(218, 100%, 60%);
-  --text-primary: hsl(0, 0%, 100%);
-  --text-secondary: hsl(0, 0%, 69%);
-  --success: hsl(158, 100%, 42%);
-  --warning: hsl(41, 100%, 50%);
-  --error: hsl(348, 95%, 61%);
+  /* Custom app-specific colors */
+  --app-bg-light: hsl(0, 0%, 100%);
+  --app-bg-dark: hsl(225, 6%, 6%);
+  --app-card-dark: hsl(240, 4%, 11%);
+  --app-accent-blue: hsl(218, 100%, 65%);
+  --app-accent-blue-hover: hsl(218, 100%, 60%);
+  --app-success: hsl(158, 100%, 42%);
+  --app-warning: hsl(41, 100%, 50%);
+  --app-error: hsl(348, 95%, 61%);
 }
 
 .dark {
@@ -70,8 +69,8 @@
   }
 
   html.dark body {
-    background-color: var(--dark-bg);
-    color: var(--text-primary);
+    background-color: var(--app-bg-dark);
+    color: var(--foreground);
   }
 }
 
@@ -142,6 +141,39 @@
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  
+  /* App-specific utility classes */
+  .bg-app-dark {
+    background-color: var(--app-bg-dark);
+  }
+  
+  .bg-app-card-dark {
+    background-color: var(--app-card-dark);
+  }
+  
+  .text-app-accent {
+    color: var(--app-accent-blue);
+  }
+  
+  .bg-app-accent {
+    background-color: var(--app-accent-blue);
+  }
+  
+  .border-app-accent {
+    border-color: var(--app-accent-blue);
+  }
+  
+  .text-app-success {
+    color: var(--app-success);
+  }
+  
+  .text-app-warning {
+    color: var(--app-warning);
+  }
+  
+  .text-app-error {
+    color: var(--app-error);
   }
 }
 

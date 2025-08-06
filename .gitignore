@@ -1,6 +1,101 @@
-node_modules
-dist
+# Зависимости Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Сборка frontend
+dist/
+build/
+coverage/
+.vite/
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+.hypothesis/
+
+# База данных
+*.db
+*.sqlite
+*.sqlite3
+app.db
+
+# Переменные окружения
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Логи
+logs/
+*.log
+log/
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+.kiro/
+
+# Системные файлы
 .DS_Store
-server/public
-vite.config.ts.*
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.tmp
+*.temp
+
+# Временные файлы проекта
 *.tar.gz
+*.zip
+*.rar
+server/public/
+vite.config.ts.*
+
+# Отчеты и документация (если автогенерируемые)
+STYLE_FIXES_REPORT.md
+coverage.xml
+*.lcov
+
+# Drizzle ORM
+drizzle/
+
+# TypeScript
+*.tsbuildinfo
+
+# ESLint
+.eslintcache
+
+# Parcel-bundler
+.parcel-cache/
