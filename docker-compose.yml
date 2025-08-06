@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "8001:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - app
+
+  backend:
+    build:
+      context: ./server_py
+    networks:
+      - app
+
+  frontend:
+    build:
+      context: ./client
+    networks:
+      - app
+
+networks:
+  app:
