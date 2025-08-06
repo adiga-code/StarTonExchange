@@ -2,36 +2,25 @@ FROM node:18-alpine as build
 
 WORKDIR /app
 
-# Устанавливаем только критически важные пакеты
-RUN npm install -g vite@latest
+# Копируем package.json и package-lock.json для лучшего кэширования
+COPY package*.json ./
 
-# Создаем минимальный package.json
-COPY <<EOF package.json
-{
-  "name": "frontend",
-  "type": "module",
-  "scripts": {
-    "build": "vite build"
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.2",
-    "vite": "^5.4.19"
-  }
-}
-EOF
+# Устанавливаем зависимости
+RUN npm ci --only=production=false
 
-RUN npm install
+# Копируем конфигурационные файлы
+COPY vite.config.ts ./
+COPY tsconfig.json ./
+COPY tailwind.config.ts ./
+COPY postcss.config.js ./
+COPY components.json ./
+COPY index.html ./
 
-# Копируем минимальные файлы
-COPY vite.config.ts .
-COPY index.html .
+# Копируем исходный код и shared схемы
 COPY src/ ./src/
+COPY shared/ ./shared/
 
-# Собираем
+# Собираем проект
 RUN npm run build
 
 FROM nginx:alpine
