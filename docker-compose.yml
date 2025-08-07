@@ -36,7 +36,7 @@ services:
     image: nginx:alpine
     ports:
       - "8080:80"      # Первый проект на порту 8080
-      - "8443:443"     # HTTPS для первого проекта на 8443
+      #- "8443:443"     # HTTPS для первого проекта на 8443
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro  # SSL сертификаты
