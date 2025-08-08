@@ -5,6 +5,7 @@ export function useTelegram() {
   const [user, setUser] = useState<TelegramUser | null>(null);
   const [isAvailable, setIsAvailable] = useState(false);
   const [colorScheme, setColorScheme] = useState<'light' | 'dark'>('dark');
+  const [initData, setInitData] = useState<string | null>(null);
 
   useEffect(() => {
     const available = telegramWebApp.isAvailable();
@@ -13,6 +14,7 @@ export function useTelegram() {
     if (available) {
       setUser(telegramWebApp.getUser());
       setColorScheme(telegramWebApp.getColorScheme());
+      setInitData(telegramWebApp.webApp?.initData || null);
     } else {
       // Mock user for development
       setUser({
@@ -22,6 +24,7 @@ export function useTelegram() {
         username: 'johndoe',
         language_code: 'en',
       });
+      setInitData(null);
     }
   }, []);
 
@@ -49,6 +52,7 @@ export function useTelegram() {
     user,
     isAvailable,
     colorScheme,
+    initData,
     showAlert,
     showConfirm,
     hapticFeedback,

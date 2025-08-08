@@ -21,7 +21,7 @@ export default function TelegramApp() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
   
-  const { user, isAvailable, hapticFeedback } = useTelegram();
+  const { user, isAvailable, hapticFeedback, initData } = useTelegram();
   const { theme, toggleTheme, isDark } = useTheme();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -71,9 +71,25 @@ export default function TelegramApp() {
         username: user.username || null,
         first_name: user.first_name,
         last_name: user.last_name || null,
+        init_data: initData,
       });
     }
   }, [user, isInitialized, createUserMutation.isPending]);
+
+  // Handle user query error - try to create user if not found
+  useEffect(() => {
+    if (userError && user && !createUserMutation.isPending) {
+      console.log('User not found, attempting to create:', userError);
+      
+      createUserMutation.mutate({
+        telegram_id: user.id.toString(),
+        username: user.username || null,
+        first_name: user.first_name,
+        last_name: user.last_name || null,
+        init_data: initData,
+      });
+    }
+  }, [userError, user, createUserMutation.isPending]);
 
   // Handle user query error - try to create user if not found
   useEffect(() => {
