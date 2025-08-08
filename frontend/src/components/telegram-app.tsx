@@ -67,10 +67,10 @@ export default function TelegramApp() {
       console.log('Initializing user with Telegram data:', user);
       
       createUserMutation.mutate({
-        telegramId: user.id.toString(),
+        telegram_id: user.id.toString(),
         username: user.username || null,
-        firstName: user.first_name,
-        lastName: user.last_name || null,
+        first_name: user.first_name,
+        last_name: user.last_name || null,
       });
     }
   }, [user, isInitialized, createUserMutation.isPending]);
@@ -81,10 +81,10 @@ export default function TelegramApp() {
       console.log('User not found, attempting to create:', userError);
       
       createUserMutation.mutate({
-        telegramId: user.id.toString(),
+        telegram_id: user.id.toString(),
         username: user.username || null,
-        firstName: user.first_name,
-        lastName: user.last_name || null,
+        first_name: user.first_name,
+        last_name: user.last_name || null,
       });
     }
   }, [userError, user, createUserMutation.isPending]);
