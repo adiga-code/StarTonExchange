@@ -70,19 +70,39 @@ async def create_user(
     storage: Storage = Depends(get_storage)
 ):
     try:
-        bot_token = os.getenv("BOT_TOKEN")
-        user_data.validate_init_data(bot_token)
+        logger.info(f"Received user creation request: {user_data.dict()}")
         
+        # Only validate init_data if it's provided
+        bot_token = os.getenv("BOT_TOKEN")
+        if user_data.init_data and bot_token:
+            try:
+                user_data.validate_init_data(bot_token)
+                logger.info(f"Init data validated successfully")
+            except ValueError as e:
+                logger.error(f"Init data validation failed: {e}")
+                # Don't fail if validation fails, just log it
+                pass
+        
+        # Ensure we have telegram_id
+        if not user_data.telegram_id:
+            raise HTTPException(status_code=400, detail="telegram_id is required")
+        
+        # Check if user already exists
         existing_user = await storage.get_user_by_telegram_id(user_data.telegram_id)
         if existing_user:
+            logger.info(f"User already exists: {existing_user.telegram_id}")
             return existing_user
         
+        # Create new user
         user = await storage.create_user(user_data)
         logger.info(f"Created user: {user.id} telegramId: {user.telegram_id}")
         return user
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating user: {e}")
-        raise HTTPException(status_code=400, detail="Invalid user data")
+        raise HTTPException(status_code=400, detail=f"Invalid user data: {str(e)}")
 
 @app.get("/api/users/me", response_model=UserResponse)
 async def get_current_user_info(

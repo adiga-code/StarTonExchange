@@ -30,7 +30,8 @@ export default function TelegramApp() {
   useEffect(() => {
     console.log('Telegram user:', user);
     console.log('Is available:', isAvailable);
-  }, [user, isAvailable]);
+    console.log('Init data:', initData);
+  }, [user, isAvailable, initData]);
 
   // Initialize user
   const createUserMutation = useMutation({
@@ -67,14 +68,14 @@ export default function TelegramApp() {
       console.log('Initializing user with Telegram data:', user);
       
       createUserMutation.mutate({
-        telegram_id: user.id.toString(),
+        telegramId: user.id.toString(),
         username: user.username || null,
-        first_name: user.first_name,
-        last_name: user.last_name || null,
+        firstName: user.first_name,
+        lastName: user.last_name || null,
         init_data: initData,
       });
     }
-  }, [user, isInitialized, createUserMutation.isPending]);
+  }, [user, isInitialized, createUserMutation.isPending, initData]);
 
   // Handle user query error - try to create user if not found
   useEffect(() => {
@@ -82,28 +83,14 @@ export default function TelegramApp() {
       console.log('User not found, attempting to create:', userError);
       
       createUserMutation.mutate({
-        telegram_id: user.id.toString(),
+        telegramId: user.id.toString(),
         username: user.username || null,
-        first_name: user.first_name,
-        last_name: user.last_name || null,
+        firstName: user.first_name,
+        lastName: user.last_name || null,
         init_data: initData,
       });
     }
-  }, [userError, user, createUserMutation.isPending]);
-
-  // Handle user query error - try to create user if not found
-  useEffect(() => {
-    if (userError && user && !createUserMutation.isPending) {
-      console.log('User not found, attempting to create:', userError);
-      
-      createUserMutation.mutate({
-        telegram_id: user.id.toString(),
-        username: user.username || null,
-        first_name: user.first_name,
-        last_name: user.last_name || null,
-      });
-    }
-  }, [userError, user, createUserMutation.isPending]);
+  }, [userError, user, createUserMutation.isPending, initData]);
 
   const handleTabChange = (tab: TabType) => {
     hapticFeedback('light');
