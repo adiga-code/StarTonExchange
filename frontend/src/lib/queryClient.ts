@@ -17,7 +17,7 @@ function getTelegramUserId(): string {
   
   // Fallback для разработки
   console.warn('No Telegram user found, using demo ID');
-  return '123456789';
+  return '123489';
 }
 
 // Функция для получения заголовков с реальными данными Telegram

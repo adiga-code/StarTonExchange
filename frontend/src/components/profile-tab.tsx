@@ -217,7 +217,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
             TON покупки автоматически отправляются в ваш Telegram кошелек
           </p>
           <div className="mt-2 text-xs text-gray-500 dark:text-gray-500">
-            ID: {user?.telegramId || '123456789'}
+            ID: {user?.telegramId || '123456'}
           </div>
         </div>
       </motion.div>
