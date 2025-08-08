@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { telegramWebApp } from "./telegram";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -7,18 +8,52 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+// Функция для получения реального ID пользователя Telegram
+function getTelegramUserId(): string {
+  const user = telegramWebApp.getUser();
+  if (user?.id) {
+    return user.id.toString();
+  }
+  
+  // Fallback для разработки
+  console.warn('No Telegram user found, using demo ID');
+  return '123456789';
+}
+
+// Функция для получения заголовков с реальными данными Telegram
+function getTelegramHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  
+  // Получаем реальный ID пользователя
+  const telegramId = getTelegramUserId();
+  headers['x-telegram-id'] = telegramId;
+  
+  // Если доступны initData, добавляем их тоже
+  if (telegramWebApp.webApp?.initData) {
+    headers['x-telegram-init-data'] = telegramWebApp.webApp.initData;
+  }
+  
+  console.log('Telegram headers:', headers); // Для отладки
+  
+  return headers;
+}
+
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const telegramHeaders = getTelegramHeaders();
+  
   const headers: Record<string, string> = {
-    'x-telegram-id': '123456789', // Demo user ID
+    ...telegramHeaders,
   };
   
   if (data) {
     headers['Content-Type'] = 'application/json';
   }
+  
+  console.log(`API ${method} ${url}`, { headers, data }); // Для отладки
   
   const res = await fetch(url, {
     method,
@@ -37,10 +72,10 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
+    const telegramHeaders = getTelegramHeaders();
+    
     const res = await fetch(queryKey.join("/") as string, {
-      headers: {
-        'x-telegram-id': '123456789', // Demo user ID
-      },
+      headers: telegramHeaders,
       credentials: "include",
     });
 

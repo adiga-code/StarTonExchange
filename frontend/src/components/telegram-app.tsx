@@ -19,31 +19,53 @@ export default function TelegramApp() {
   const [currentTab, setCurrentTab] = useState<TabType>('buy');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [isInitialized, setIsInitialized] = useState(false);
   
   const { user, isAvailable, hapticFeedback } = useTelegram();
   const { theme, toggleTheme, isDark } = useTheme();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Debug logs
+  useEffect(() => {
+    console.log('Telegram user:', user);
+    console.log('Is available:', isAvailable);
+  }, [user, isAvailable]);
+
   // Initialize user
   const createUserMutation = useMutation({
     mutationFn: async (userData: any) => {
+      console.log('Creating user:', userData);
       const response = await apiRequest('POST', '/api/users', userData);
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log('User created successfully:', data);
       queryClient.invalidateQueries({ queryKey: ['/api/users/me'] });
+      setIsInitialized(true);
+    },
+    onError: (error) => {
+      console.error('Error creating user:', error);
+      toast({
+        title: "Ошибка инициализации",
+        description: "Не удалось создать пользователя",
+        variant: "destructive",
+      });
     },
   });
 
-  // Get current user data
-  const { data: currentUser, isLoading: userLoading } = useQuery<UserType>({
+  // Get current user data - only query when we have a user
+  const { data: currentUser, isLoading: userLoading, error: userError } = useQuery<UserType>({
     queryKey: ['/api/users/me'],
-    enabled: !!user,
+    enabled: !!user && isInitialized,
+    retry: false,
   });
 
+  // Initialize user when Telegram data becomes available
   useEffect(() => {
-    if (user && !currentUser && !userLoading) {
+    if (user && !isInitialized && !createUserMutation.isPending) {
+      console.log('Initializing user with Telegram data:', user);
+      
       createUserMutation.mutate({
         telegramId: user.id.toString(),
         username: user.username || null,
@@ -51,13 +73,26 @@ export default function TelegramApp() {
         lastName: user.last_name || null,
       });
     }
-  }, [user, currentUser, userLoading]);
+  }, [user, isInitialized, createUserMutation.isPending]);
+
+  // Handle user query error - try to create user if not found
+  useEffect(() => {
+    if (userError && user && !createUserMutation.isPending) {
+      console.log('User not found, attempting to create:', userError);
+      
+      createUserMutation.mutate({
+        telegramId: user.id.toString(),
+        username: user.username || null,
+        firstName: user.first_name,
+        lastName: user.last_name || null,
+      });
+    }
+  }, [userError, user, createUserMutation.isPending]);
 
   const handleTabChange = (tab: TabType) => {
     hapticFeedback('light');
     setCurrentTab(tab);
   };
-
 
   const showLoadingModal = (message: string) => {
     setLoadingMessage(message);
@@ -76,10 +111,16 @@ export default function TelegramApp() {
     return (first + last).toUpperCase() || user.username?.[0]?.toUpperCase() || 'U';
   };
 
-  if (userLoading) {
+  // Show loading while initializing
+  if (!user || (!isInitialized && createUserMutation.isPending) || userLoading) {
     return (
-      <div className="min-h-screen bg-dark-bg dark:bg-dark-bg flex items-center justify-center">
-        <div className="animate-spin w-12 h-12 border-4 border-accent-blue border-t-transparent rounded-full"></div>
+      <div className="min-h-screen bg-white dark:bg-[#0E0E10] flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin w-12 h-12 border-4 border-[#4E7FFF] border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">
+            {!user ? 'Загрузка Telegram...' : 'Инициализация пользователя...'}
+          </p>
+        </div>
       </div>
     );
   }
@@ -122,7 +163,6 @@ export default function TelegramApp() {
       {/* Main Content */}
       <main className="pb-20">
         <BalanceCard user={currentUser} />
-
 
         {/* Tab Content */}
         <AnimatePresence mode="wait">
@@ -185,7 +225,6 @@ export default function TelegramApp() {
           ))}
         </div>
       </nav>
-
 
       {/* Loading Modal */}
       <LoadingModal 
