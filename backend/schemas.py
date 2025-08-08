@@ -4,11 +4,31 @@ from datetime import datetime
 from decimal import Decimal
 
 # User schemas
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import datetime
+from decimal import Decimal
+import json
+
 class UserCreate(BaseModel):
-    telegram_id: str
+    telegram_id: Optional[str] = None
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    init_data: Optional[str] = Field(None, alias="init_data")
+
+    def validate_init_data(self, bot_token: str):
+        from backend.telegram_auth import validate_telegram_data
+        if self.init_data:
+            user_data = validate_telegram_data(self.init_data, bot_token)
+            if not user_data:
+                raise ValueError("Invalid Telegram init_data")
+            self.telegram_id = str(user_data.get("id"))
+            self.username = user_data.get("username")
+            self.first_name = user_data.get("first_name")
+            self.last_name = user_data.get("last_name")
+        elif not self.telegram_id:
+            raise ValueError("telegram_id or init_data must be provided")
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None

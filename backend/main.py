@@ -70,6 +70,9 @@ async def create_user(
     storage: Storage = Depends(get_storage)
 ):
     try:
+        bot_token = os.getenv("BOT_TOKEN")
+        user_data.validate_init_data(bot_token)
+        
         existing_user = await storage.get_user_by_telegram_id(user_data.telegram_id)
         if existing_user:
             return existing_user
