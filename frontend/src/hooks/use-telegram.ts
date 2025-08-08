@@ -16,7 +16,7 @@ export function useTelegram() {
     } else {
       // Mock user for development
       setUser({
-        id: 123456789,
+        id: 56789,
         first_name: 'John',
         last_name: 'Doe',
         username: 'johndoe',
