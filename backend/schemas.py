@@ -7,7 +7,7 @@ import json
 class UserCreate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     
-    telegram_id: Optional[str] = Field(None, alias="telegramId")
+    telegram_id: str = Field(..., alias="telegramId")
     username: Optional[str] = None
     first_name: Optional[str] = Field(None, alias="firstName")
     last_name: Optional[str] = Field(None, alias="lastName")
