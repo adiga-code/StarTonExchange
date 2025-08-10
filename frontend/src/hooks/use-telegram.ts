@@ -16,14 +16,7 @@ export function useTelegram() {
       setColorScheme(telegramWebApp.getColorScheme());
       setInitData(telegramWebApp.webApp?.initData || null);
     } else {
-      // Mock user for development
-      setUser({
-        id: 56789,
-        first_name: 'John',
-        last_name: 'Doe',
-        username: 'johndoe',
-        language_code: 'en',
-      });
+      setUser(null);
       setInitData(null);
     }
   }, []);

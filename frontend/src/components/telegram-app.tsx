@@ -26,6 +26,25 @@ export default function TelegramApp() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Если не Telegram Browser — показываем заглушку
+  if (!isAvailable) {
+    return (
+      <div className="min-h-screen bg-white dark:bg-[#0E0E10] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 rounded-full mx-auto mb-4 bg-[#4E7FFF] flex items-center justify-center">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+              <circle cx="16" cy="16" r="16" fill="#4E7FFF"/>
+              <path d="M10 16L22 10L19 22L15 18L10 16Z" fill="white"/>
+            </svg>
+          </div>
+          <p className="text-gray-600 dark:text-gray-400 text-lg font-semibold">
+            Откройте этот сайт внутри Telegram<br />через <b>бота</b> или <b>WebApp</b>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Debug logs
   useEffect(() => {
     console.log('Telegram user:', user);
