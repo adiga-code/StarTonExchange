@@ -96,6 +96,15 @@ export class TelegramWebApp {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
       this.webApp = window.Telegram.WebApp;
       this.init();
+      
+      // Логируем информацию о WebApp для отладки
+      console.log('TelegramWebApp initialized:',
+        this.isAvailable() ? 'Available' : 'Not available',
+        'User:', this.getUser()?.id || 'No user',
+        'InitData length:', this.getInitData()?.length || 0
+      );
+    } else {
+      console.log('TelegramWebApp not available');
     }
   }
 
@@ -108,8 +117,12 @@ export class TelegramWebApp {
 
   private init() {
     if (this.webApp) {
-      this.webApp.ready();
-      this.webApp.expand();
+      try {
+        this.webApp.ready();
+        this.webApp.expand();
+      } catch (e) {
+        console.error('Error initializing Telegram WebApp:', e);
+      }
     }
   }
 
@@ -118,7 +131,23 @@ export class TelegramWebApp {
   }
 
   getUser(): TelegramUser | null {
-    return this.webApp?.initDataUnsafe?.user || null;
+    try {
+      if (this.webApp?.initDataUnsafe?.user) {
+        return this.webApp.initDataUnsafe.user;
+      }
+    } catch (e) {
+      console.error('Error getting Telegram user:', e);
+    }
+    return null;
+  }
+
+  getInitData(): string | null {
+    try {
+      return this.webApp?.initData || null;
+    } catch (e) {
+      console.error('Error getting Telegram initData:', e);
+      return null;
+    }
   }
 
   getStartParam(): string | null {

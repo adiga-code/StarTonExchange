@@ -8,32 +8,22 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-// Функция для получения реального ID пользователя Telegram
-function getTelegramUserId(): string {
-  const user = telegramWebApp.getUser();
-  if (user?.id) {
-    return user.id.toString();
-  }
-  
-  // Fallback для разработки
-  console.warn('No Telegram user found, using demo ID');
-  return '123489';
-}
-
-// Функция для получения заголовков с реальными данными Telegram
 function getTelegramHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   
-  // Получаем реальный ID пользователя
-  const telegramId = getTelegramUserId();
-  headers['x-telegram-id'] = telegramId;
-  
-  // Если доступны initData, добавляем их тоже
-  if (telegramWebApp.webApp?.initData) {
-    headers['x-telegram-init-data'] = telegramWebApp.webApp.initData;
+  // Получаем пользователя
+  const user = telegramWebApp.getUser();
+  if (user?.id) {
+    headers['x-telegram-id'] = user.id.toString();
+    console.log('Using Telegram ID:', user.id);
   }
   
-  console.log('Telegram headers:', headers); // Для отладки
+  // Передаем initData в заголовке - это самый важный параметр!
+  const initData = telegramWebApp.getInitData();
+  if (initData) {
+    headers['x-telegram-init-data'] = initData;
+    console.log('Using initData with length:', initData.length);
+  }
   
   return headers;
 }
@@ -53,7 +43,10 @@ export async function apiRequest(
     headers['Content-Type'] = 'application/json';
   }
   
-  console.log(`API ${method} ${url}`, { headers, data }); // Для отладки
+  console.log(`API ${method} ${url} headers:`, { 
+    telegramId: headers['x-telegram-id'] || '-', 
+    initDataLength: headers['x-telegram-init-data']?.length || 0 
+  });
   
   const res = await fetch(url, {
     method,

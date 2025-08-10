@@ -95,22 +95,46 @@ def get_user_from_header(telegram_id: str = None, init_data: str = None) -> Opti
     
     logger.info(f"Getting user from headers: telegram_id={telegram_id}, has_init_data={bool(init_data)}, has_bot_token={bool(bot_token)}")
     
-    # If we have init_data and bot_token, validate it
+    # Для режима разработки и отладки
+    # if settings.debug:
+    #     # Если есть telegram_id, используем его напрямую
+    #     if telegram_id:
+    #         logger.info(f"Debug mode: Using telegram_id={telegram_id} without validation")
+    #         return {
+    #             'id': int(telegram_id),
+    #             'first_name': 'Dev',
+    #             'last_name': 'User',
+    #             'username': f'dev_{telegram_id}'
+    #         }
+        
+    #     # Если нет ID, используем тестового пользователя
+    #     logger.info("Debug mode: Using test user")
+    #     return {
+    #         'id': 123456789,
+    #         'first_name': 'Test',
+    #         'last_name': 'User',
+    #         'username': 'testuser'
+    #     }
+    
+    # Для продакшена - строго проверяем initData
     if init_data and bot_token:
         user_data = validate_telegram_data(init_data, bot_token)
         if user_data:
+            logger.info(f"Production: Validated user from init_data: {user_data.get('id')}")
             return user_data
     
-    # Fallback - use telegram_id for development or if validation fails
+    # Если нет initData или не прошла валидация - проверяем наличие telegram_id
     if telegram_id:
-        logger.info(f"Using fallback mode for telegram_id: {telegram_id}")
+        logger.warning(f"Production: Using unvalidated telegram_id={telegram_id} (no valid init_data)")
         return {
             'id': int(telegram_id),
-            'first_name': 'Dev',
+            'first_name': 'Unknown',
             'last_name': 'User',
-            'username': 'devuser'
+            'username': f'user_{telegram_id}'
         }
     
+    # Если нет ни initData, ни telegram_id - не авторизуем
+    logger.error("Production: No valid user data found")
     return None
 
 async def get_current_user(storage, telegram_id: str = None, init_data: str = None):

@@ -77,20 +77,27 @@ export default function TelegramApp() {
     }
   }, [user, isInitialized, createUserMutation.isPending, initData]);
 
-  // Handle user query error - try to create user if not found
-  useEffect(() => {
-    if (userError && user && !createUserMutation.isPending) {
-      console.log('User not found, attempting to create:', userError);
-      
-      createUserMutation.mutate({
-        telegramId: user.id.toString(),
-        username: user.username || null,
-        firstName: user.first_name,
-        lastName: user.last_name || null,
-        init_data: initData,
-      });
-    }
-  }, [userError, user, createUserMutation.isPending, initData]);
+// Initialize user when Telegram data becomes available
+useEffect(() => {
+  // Логируем все данные, которые имеем
+  console.log("TelegramApp initialization:", {
+    user: user ? { id: user.id, username: user.username } : null,
+    isInitialized,
+    isPending: createUserMutation.isPending,
+    initDataLength: initData?.length || 0
+  });
+
+  if (user && !isInitialized && !createUserMutation.isPending) {
+    // Создаем пользователя с полными данными
+    createUserMutation.mutate({
+      telegramId: user.id.toString(), // Важно преобразовать в строку
+      username: user.username || null,
+      firstName: user.first_name,
+      lastName: user.last_name || null,
+      init_data: initData,
+    });
+  }
+}, [user, isInitialized, createUserMutation.isPending, initData]);
 
   const handleTabChange = (tab: TabType) => {
     hapticFeedback('light');

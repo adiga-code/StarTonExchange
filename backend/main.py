@@ -63,7 +63,6 @@ async def get_authenticated_user(
 ) -> Optional[User]:
     return await get_current_user(storage, x_telegram_id, x_telegram_init_data)
 
-# User routes
 @app.post("/api/users", response_model=UserResponse)
 async def create_user(
     user_data: UserCreate,
@@ -72,30 +71,26 @@ async def create_user(
     try:
         logger.info(f"Received user creation request: {user_data.dict()}")
         
-        # Only validate init_data if it's provided
-        bot_token = os.getenv("BOT_TOKEN")
-        if user_data.init_data and bot_token:
-            try:
-                user_data.validate_init_data(bot_token)
-                logger.info(f"Init data validated successfully")
-            except ValueError as e:
-                logger.error(f"Init data validation failed: {e}")
-                # Don't fail if validation fails, just log it
-                pass
+        # Проверяем, есть ли у нас telegram_id
+        # if not user_data.telegram_id:
+        #     logger.error("Missing telegram_id in user creation request")
+        #     if settings.debug:
+        #         # В режиме отладки используем тестовый ID
+        #         user_data.telegram_id = "123456789"
+        #         logger.info(f"Debug mode: Using fallback telegram_id={user_data.telegram_id}")
+        #     else:
+        #         # В production строго требуем telegram_id
+        #         raise HTTPException(status_code=400, detail="telegram_id is required")
         
-        # Ensure we have telegram_id
-        if not user_data.telegram_id:
-            raise HTTPException(status_code=400, detail="telegram_id is required")
-        
-        # Check if user already exists
+        # Проверяем, существует ли пользователь
         existing_user = await storage.get_user_by_telegram_id(user_data.telegram_id)
         if existing_user:
             logger.info(f"User already exists: {existing_user.telegram_id}")
             return existing_user
         
-        # Create new user
+        # Создаем нового пользователя
         user = await storage.create_user(user_data)
-        logger.info(f"Created user: {user.id} telegramId: {user.telegram_id}")
+        logger.info(f"Created user: {user.id} telegram_id: {user.telegram_id}")
         return user
         
     except HTTPException:
