@@ -92,29 +92,30 @@ def get_user_from_header(telegram_id: str = None, init_data: str = None) -> Opti
     Get user data from headers - for development and production
     """
     bot_token = os.getenv('BOT_TOKEN')
+    is_development = os.getenv('DEVELOPMENT', 'false').lower() == 'true'
     
-    logger.info(f"Getting user from headers: telegram_id={telegram_id}, has_init_data={bool(init_data)}, has_bot_token={bool(bot_token)}")
+    logger.info(f"Getting user from headers: telegram_id={telegram_id}, has_init_data={bool(init_data)}, has_bot_token={bool(bot_token)}, is_development={is_development}")
     
-    # Для режима разработки и отладки
-    # if settings.debug:
-    #     # Если есть telegram_id, используем его напрямую
-    #     if telegram_id:
-    #         logger.info(f"Debug mode: Using telegram_id={telegram_id} without validation")
-    #         return {
-    #             'id': int(telegram_id),
-    #             'first_name': 'Dev',
-    #             'last_name': 'User',
-    #             'username': f'dev_{telegram_id}'
-    #         }
+    # Для режима разработки - разрешаем мок-данные
+    if is_development:
+        # Если есть telegram_id, используем его напрямую
+        if telegram_id:
+            logger.info(f"Development mode: Using telegram_id={telegram_id} without validation")
+            return {
+                'id': int(telegram_id),
+                'first_name': 'Dev',
+                'last_name': 'User',
+                'username': f'dev_{telegram_id}'
+            }
         
-    #     # Если нет ID, используем тестового пользователя
-    #     logger.info("Debug mode: Using test user")
-    #     return {
-    #         'id': 123456789,
-    #         'first_name': 'Test',
-    #         'last_name': 'User',
-    #         'username': 'testuser'
-    #     }
+        # Если нет ID, используем тестового пользователя
+        logger.info("Development mode: Using default test user")
+        return {
+            'id': 56789,
+            'first_name': 'John',
+            'last_name': 'Doe',
+            'username': 'johndoe'
+        }
     
     # Для продакшена - строго проверяем initData
     if init_data and bot_token:

@@ -794,7 +794,6 @@ async def get_authenticated_user(
 ) -> Optional[User]:
     return await get_current_user(storage, x_telegram_id, x_telegram_init_data)
 
-# User routes
 @app.post("/api/users", response_model=UserResponse)
 async def create_user(
     user_data: UserCreate,
@@ -803,30 +802,26 @@ async def create_user(
     try:
         logger.info(f"Received user creation request: {user_data.dict()}")
         
-        # Only validate init_data if it's provided
-        bot_token = os.getenv("BOT_TOKEN")
-        if user_data.init_data and bot_token:
-            try:
-                user_data.validate_init_data(bot_token)
-                logger.info(f"Init data validated successfully")
-            except ValueError as e:
-                logger.error(f"Init data validation failed: {e}")
-                # Don't fail if validation fails, just log it
-                pass
+        # Проверяем, есть ли у нас telegram_id
+        # if not user_data.telegram_id:
+        #     logger.error("Missing telegram_id in user creation request")
+        #     if settings.debug:
+        #         # В режиме отладки используем тестовый ID
+        #         user_data.telegram_id = "123456789"
+        #         logger.info(f"Debug mode: Using fallback telegram_id={user_data.telegram_id}")
+        #     else:
+        #         # В production строго требуем telegram_id
+        #         raise HTTPException(status_code=400, detail="telegram_id is required")
         
-        # Ensure we have telegram_id
-        if not user_data.telegram_id:
-            raise HTTPException(status_code=400, detail="telegram_id is required")
-        
-        # Check if user already exists
+        # Проверяем, существует ли пользователь
         existing_user = await storage.get_user_by_telegram_id(user_data.telegram_id)
         if existing_user:
             logger.info(f"User already exists: {existing_user.telegram_id}")
             return existing_user
         
-        # Create new user
+        # Создаем нового пользователя
         user = await storage.create_user(user_data)
-        logger.info(f"Created user: {user.id} telegramId: {user.telegram_id}")
+        logger.info(f"Created user: {user.id} telegram_id: {user.telegram_id}")
         return user
         
     except HTTPException:
@@ -2078,22 +2073,46 @@ def get_user_from_header(telegram_id: str = None, init_data: str = None) -> Opti
     
     logger.info(f"Getting user from headers: telegram_id={telegram_id}, has_init_data={bool(init_data)}, has_bot_token={bool(bot_token)}")
     
-    # If we have init_data and bot_token, validate it
+    # Для режима разработки и отладки
+    # if settings.debug:
+    #     # Если есть telegram_id, используем его напрямую
+    #     if telegram_id:
+    #         logger.info(f"Debug mode: Using telegram_id={telegram_id} without validation")
+    #         return {
+    #             'id': int(telegram_id),
+    #             'first_name': 'Dev',
+    #             'last_name': 'User',
+    #             'username': f'dev_{telegram_id}'
+    #         }
+        
+    #     # Если нет ID, используем тестового пользователя
+    #     logger.info("Debug mode: Using test user")
+    #     return {
+    #         'id': 123456789,
+    #         'first_name': 'Test',
+    #         'last_name': 'User',
+    #         'username': 'testuser'
+    #     }
+    
+    # Для продакшена - строго проверяем initData
     if init_data and bot_token:
         user_data = validate_telegram_data(init_data, bot_token)
         if user_data:
+            logger.info(f"Production: Validated user from init_data: {user_data.get('id')}")
             return user_data
     
-    # Fallback - use telegram_id for development or if validation fails
+    # Если нет initData или не прошла валидация - проверяем наличие telegram_id
     if telegram_id:
-        logger.info(f"Using fallback mode for telegram_id: {telegram_id}")
+        logger.warning(f"Production: Using unvalidated telegram_id={telegram_id} (no valid init_data)")
         return {
             'id': int(telegram_id),
-            'first_name': 'Dev',
+            'first_name': 'Unknown',
             'last_name': 'User',
-            'username': 'devuser'
+            'username': f'user_{telegram_id}'
         }
     
+    # Если нет ни initData, ни telegram_id - не авторизуем
+    logger.error("Production: No valid user data found")
     return None
 
 async def get_current_user(storage, telegram_id: str = None, init_data: str = None):
@@ -2168,7 +2187,7 @@ FILE: frontend\index.html
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <!-- This is a replit script which adds a banner on the top of the page when opened in development mode outside the replit environment -->
-    <script type="text/javascript" src="https://replit.com/public/js/replit-dev-banner.js"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </body>
 </html>
 
@@ -2904,8 +2923,170 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 
-createRoot(document.getElementById("root")!).render(<App />);
+// Типизация для Telegram WebApp
+interface TelegramWebApp {
+  initData: string;
+  initDataUnsafe: Record<string, any>;
+  version: string;
+  platform: string;
+  colorScheme: 'light' | 'dark';
+  themeParams: Record<string, string>;
+  isExpanded: boolean;
+  viewportHeight: number;
+  viewportStableHeight: number;
+  ready(): void;
+  expand(): void;
+  close(): void;
+}
 
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp: TelegramWebApp;
+    };
+  }
+}
+
+// Проверка, находимся ли мы в настоящем Telegram WebApp
+const isTelegramWebApp = (): boolean => {
+  try {
+    const tg = window.Telegram?.WebApp;
+    
+    if (!tg) return false;
+    
+    // Проверяем наличие ключевых методов и свойств
+    const hasRequiredMethods = typeof tg.ready === 'function' &&
+                              typeof tg.expand === 'function' &&
+                              typeof tg.close === 'function';
+    
+    const hasRequiredProps = typeof tg.version === 'string' &&
+                            typeof tg.platform === 'string' &&
+                            typeof tg.initData === 'string';
+    
+    // Дополнительная проверка на подлинность через initData
+    const hasValidInitData = tg.initData && tg.initData.length > 0;
+    
+    return hasRequiredMethods && hasRequiredProps && hasValidInitData;
+  } catch (error) {
+    console.warn('Ошибка при проверке Telegram WebApp:', error);
+    return false;
+  }
+};
+
+// Показать сообщение об ошибке доступа
+const showAccessDeniedMessage = (): void => {
+  document.body.innerHTML = `
+    <div style="
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: center; 
+      height: 100vh; 
+      text-align: center; 
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    ">
+      <div style="
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        padding: 40px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        max-width: 400px;
+      ">
+        <h1 style="margin-bottom: 20px; font-size: 24px; font-weight: 600;">
+          🤖 Только для Telegram
+        </h1>
+        <p style="margin-bottom: 30px; font-size: 16px; line-height: 1.5; opacity: 0.9;">
+          Это приложение работает только внутри Telegram WebApp
+        </p>
+        <a 
+          href="https://t.me/your_bot_username" 
+          style="
+            display: inline-block;
+            background: #4E7FFF;
+            color: white;
+            text-decoration: none;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-weight: 500;
+            transition: background 0.3s;
+          "
+          onmouseover="this.style.background='#3d6ce8'"
+          onmouseout="this.style.background='#4E7FFF'"
+        >
+          Открыть в Telegram
+        </a>
+      </div>
+    </div>
+  `;
+};
+
+// Инициализация приложения
+const initializeApp = (): void => {
+  try {
+    const rootElement = document.getElementById("root");
+    
+    if (!rootElement) {
+      throw new Error("Элемент с id 'root' не найден");
+    }
+
+    // В development режиме разрешаем доступ без Telegram
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('🚧 Development режим: приложение запущено без проверки Telegram WebApp');
+      createRoot(rootElement).render(<App />);
+      return;
+    }
+
+    // В production проверяем Telegram WebApp
+    if (!isTelegramWebApp()) {
+      showAccessDeniedMessage();
+      return;
+    }
+
+    // Инициализируем Telegram WebApp
+    window.Telegram!.WebApp.ready();
+    window.Telegram!.WebApp.expand();
+    
+    // Применяем тему Telegram
+    if (window.Telegram!.WebApp.colorScheme === 'dark') {
+      document.documentElement.classList.add('dark');
+    }
+
+    // Запускаем React приложение
+    createRoot(rootElement).render(<App />);
+    
+  } catch (error) {
+    console.error('Критическая ошибка при инициализации приложения:', error);
+    
+    document.body.innerHTML = `
+      <div style="
+        display: flex; 
+        flex-direction: column; 
+        align-items: center; 
+        justify-content: center; 
+        height: 100vh; 
+        text-align: center; 
+        padding: 20px;
+        font-family: monospace;
+        background: #1a1a1a;
+        color: #ff6b6b;
+      ">
+        <h1>❌ Ошибка инициализации</h1>
+        <p>Произошла критическая ошибка при запуске приложения</p>
+        <details style="margin-top: 20px; color: #888;">
+          <summary>Подробности</summary>
+          <pre style="margin-top: 10px; font-size: 12px;">${error.message}</pre>
+        </details>
+      </div>
+    `;
+  }
+};
+
+// Запуск приложения
+initializeApp();
 
 ================================================================================
 FILE: frontend\src\components\admin-panel.tsx
@@ -4320,20 +4501,27 @@ export default function TelegramApp() {
     }
   }, [user, isInitialized, createUserMutation.isPending, initData]);
 
-  // Handle user query error - try to create user if not found
-  useEffect(() => {
-    if (userError && user && !createUserMutation.isPending) {
-      console.log('User not found, attempting to create:', userError);
-      
-      createUserMutation.mutate({
-        telegramId: user.id.toString(),
-        username: user.username || null,
-        firstName: user.first_name,
-        lastName: user.last_name || null,
-        init_data: initData,
-      });
-    }
-  }, [userError, user, createUserMutation.isPending, initData]);
+// Initialize user when Telegram data becomes available
+useEffect(() => {
+  // Логируем все данные, которые имеем
+  console.log("TelegramApp initialization:", {
+    user: user ? { id: user.id, username: user.username } : null,
+    isInitialized,
+    isPending: createUserMutation.isPending,
+    initDataLength: initData?.length || 0
+  });
+
+  if (user && !isInitialized && !createUserMutation.isPending) {
+    // Создаем пользователя с полными данными
+    createUserMutation.mutate({
+      telegramId: user.id.toString(), // Важно преобразовать в строку
+      username: user.username || null,
+      firstName: user.first_name,
+      lastName: user.last_name || null,
+      init_data: initData,
+    });
+  }
+}, [user, isInitialized, createUserMutation.isPending, initData]);
 
   const handleTabChange = (tab: TabType) => {
     hapticFeedback('light');
@@ -9892,32 +10080,22 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-// Функция для получения реального ID пользователя Telegram
-function getTelegramUserId(): string {
-  const user = telegramWebApp.getUser();
-  if (user?.id) {
-    return user.id.toString();
-  }
-  
-  // Fallback для разработки
-  console.warn('No Telegram user found, using demo ID');
-  return '123489';
-}
-
-// Функция для получения заголовков с реальными данными Telegram
 function getTelegramHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   
-  // Получаем реальный ID пользователя
-  const telegramId = getTelegramUserId();
-  headers['x-telegram-id'] = telegramId;
-  
-  // Если доступны initData, добавляем их тоже
-  if (telegramWebApp.webApp?.initData) {
-    headers['x-telegram-init-data'] = telegramWebApp.webApp.initData;
+  // Получаем пользователя
+  const user = telegramWebApp.getUser();
+  if (user?.id) {
+    headers['x-telegram-id'] = user.id.toString();
+    console.log('Using Telegram ID:', user.id);
   }
   
-  console.log('Telegram headers:', headers); // Для отладки
+  // Передаем initData в заголовке - это самый важный параметр!
+  const initData = telegramWebApp.getInitData();
+  if (initData) {
+    headers['x-telegram-init-data'] = initData;
+    console.log('Using initData with length:', initData.length);
+  }
   
   return headers;
 }
@@ -9937,7 +10115,10 @@ export async function apiRequest(
     headers['Content-Type'] = 'application/json';
   }
   
-  console.log(`API ${method} ${url}`, { headers, data }); // Для отладки
+  console.log(`API ${method} ${url} headers:`, { 
+    telegramId: headers['x-telegram-id'] || '-', 
+    initDataLength: headers['x-telegram-init-data']?.length || 0 
+  });
   
   const res = await fetch(url, {
     method,
@@ -10088,6 +10269,15 @@ export class TelegramWebApp {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
       this.webApp = window.Telegram.WebApp;
       this.init();
+      
+      // Логируем информацию о WebApp для отладки
+      console.log('TelegramWebApp initialized:',
+        this.isAvailable() ? 'Available' : 'Not available',
+        'User:', this.getUser()?.id || 'No user',
+        'InitData length:', this.getInitData()?.length || 0
+      );
+    } else {
+      console.log('TelegramWebApp not available');
     }
   }
 
@@ -10100,8 +10290,12 @@ export class TelegramWebApp {
 
   private init() {
     if (this.webApp) {
-      this.webApp.ready();
-      this.webApp.expand();
+      try {
+        this.webApp.ready();
+        this.webApp.expand();
+      } catch (e) {
+        console.error('Error initializing Telegram WebApp:', e);
+      }
     }
   }
 
@@ -10110,7 +10304,23 @@ export class TelegramWebApp {
   }
 
   getUser(): TelegramUser | null {
-    return this.webApp?.initDataUnsafe?.user || null;
+    try {
+      if (this.webApp?.initDataUnsafe?.user) {
+        return this.webApp.initDataUnsafe.user;
+      }
+    } catch (e) {
+      console.error('Error getting Telegram user:', e);
+    }
+    return null;
+  }
+
+  getInitData(): string | null {
+    try {
+      return this.webApp?.initData || null;
+    } catch (e) {
+      console.error('Error getting Telegram initData:', e);
+      return null;
+    }
   }
 
   getStartParam(): string | null {
