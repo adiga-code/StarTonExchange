@@ -58,10 +58,12 @@ async def get_storage(db: AsyncSession = Depends(get_db)):
 # Dependency to get current user
 async def get_authenticated_user(
     storage: Storage = Depends(get_storage),
-    x_telegram_id: Optional[str] = Header(None),
     x_telegram_init_data: Optional[str] = Header(None)
-) -> Optional[User]:
-    return await get_current_user(storage, x_telegram_id, x_telegram_init_data)
+) -> User:
+    user = await get_current_user(storage, None, x_telegram_init_data)
+    if not user:
+        raise HTTPException(status_code=403, detail="Invalid or missing Telegram authentication data")
+    return user
 
 # User routes
 @app.post("/api/users", response_model=UserResponse)
@@ -85,8 +87,6 @@ async def create_user(
 async def get_current_user_info(
     current_user: User = Depends(get_authenticated_user)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
     return current_user
 
 @app.put("/api/users/me", response_model=UserResponse)
@@ -95,9 +95,6 @@ async def update_current_user(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     update_dict = {k: v for k, v in updates.dict().items() if v is not None}
     updated_user = await storage.update_user(current_user.id, update_dict)
     return updated_user
@@ -145,9 +142,6 @@ async def make_purchase(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     try:
         # Validate currency
         if purchase_data.currency not in ['stars', 'ton']:
@@ -206,18 +200,14 @@ async def make_purchase(
 # Tasks routes
 @app.get("/api/tasks", response_model=List[TaskResponse])
 async def get_tasks(
-    current_user: Optional[User] = Depends(get_authenticated_user),
+    current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
     try:
         tasks = await storage.get_active_tasks()
-        
-        if not current_user:
-            return [TaskResponse(**task.__dict__, completed=False) for task in tasks]
-        
         user_tasks = await storage.get_user_tasks(current_user.id)
         user_task_map = {ut.task_id: ut for ut in user_tasks}
-        
+
         tasks_with_completion = []
         for task in tasks:
             user_task = user_task_map.get(task.id)
@@ -225,7 +215,7 @@ async def get_tasks(
             task_dict['completed'] = user_task.completed if user_task else False
             task_dict['completed_at'] = user_task.completed_at if user_task else None
             tasks_with_completion.append(TaskResponse(**task_dict))
-        
+
         return tasks_with_completion
     except Exception as e:
         logger.error(f"Error getting tasks: {e}")
@@ -237,9 +227,6 @@ async def complete_task(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     try:
         task = await storage.get_task(task_id)
         if not task:
@@ -293,9 +280,6 @@ async def get_referral_stats(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     try:
         all_users = await storage.get_all_users()
         referrals = [u for u in all_users if u.referred_by == current_user.id]
@@ -401,9 +385,6 @@ async def get_payment_status(
     storage: Storage = Depends(get_storage)
 ):
     """Get payment status for transaction"""
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     try:
         transaction = await storage.get_transaction(transaction_id)
         

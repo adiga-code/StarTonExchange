@@ -10,6 +10,7 @@ import BuyTab from "./buy-tab";
 import TasksTab from "./tasks-tab";
 import ProfileTab from "./profile-tab";
 import LoadingModal from "./loading-modal";
+import TelegramGuard from "./telegram-guard";
 import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Coins, TrendingUp } from "lucide-react";
 import type { User as UserType } from "../../shared/schema";
 

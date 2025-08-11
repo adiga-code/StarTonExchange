@@ -169,6 +169,9 @@ export class TelegramWebApp {
       this.webApp.switchInlineQuery(query, chatTypes);
     }
   }
+  getInitData(): string | null {
+    return this.webApp?.initData || null;
+  }
 }
 
 export const telegramWebApp = TelegramWebApp.getInstance();

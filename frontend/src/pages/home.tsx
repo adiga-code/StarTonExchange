@@ -1,5 +1,10 @@
 import TelegramApp from "@/components/telegram-app";
+import TelegramGuard from "@/components/telegram-guard";
 
 export default function Home() {
-  return <TelegramApp />;
+  return (
+    <TelegramGuard>
+      <TelegramApp />
+    </TelegramGuard>
+  );
 }

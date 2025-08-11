@@ -13,15 +13,6 @@ export function useTelegram() {
     if (available) {
       setUser(telegramWebApp.getUser());
       setColorScheme(telegramWebApp.getColorScheme());
-    } else {
-      // Mock user for development
-      setUser({
-        id: 123456789,
-        first_name: 'John',
-        last_name: 'Doe',
-        username: 'johndoe',
-        language_code: 'en',
-      });
     }
   }, []);
 
