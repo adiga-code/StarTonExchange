@@ -72,22 +72,20 @@ def validate_telegram_data(init_data: str, bot_token: str) -> Optional[Dict]:
 
 def get_user_from_header(telegram_id: str = None, init_data: str = None) -> Optional[Dict]:
     """
-    Get user data from headers - for development and production
+    Get user data from headers - only with valid initData
     """
     bot_token = os.getenv('BOT_TOKEN')
-    
-    # Development mode - use simple telegram_id
-    if not bot_token or not init_data:
-        if telegram_id:
-            return {
-                'id': int(telegram_id),
-                'first_name': 'Dev',
-                'last_name': 'User',
-                'username': 'devuser'
-            }
+
+    # Требуем наличие BOT_TOKEN и init_data
+    if not bot_token:
+        print("BOT_TOKEN not configured")
         return None
-    
-    # Production mode - validate init_data
+
+    if not init_data:
+        print("init_data not provided")
+        return None
+
+    # Валидируем init_data
     return validate_telegram_data(init_data, bot_token)
 
 async def get_current_user(storage, telegram_id: str = None, init_data: str = None):

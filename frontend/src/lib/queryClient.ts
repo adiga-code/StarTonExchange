@@ -12,9 +12,13 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const headers: Record<string, string> = {
-    'x-telegram-id': '123456789', // Demo user ID
-  };
+  const headers: Record<string, string> = {};
+  
+  // Получаем initData из Telegram Web App
+  const initData = (window as any).Telegram?.WebApp?.initData;
+  if (initData) {
+    headers['x-telegram-init-data'] = initData;
+  }
   
   if (data) {
     headers['Content-Type'] = 'application/json';
@@ -37,10 +41,16 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
+    const headers: Record<string, string> = {};
+    
+    // Получаем initData из Telegram Web App
+    const initData = (window as any).Telegram?.WebApp?.initData;
+    if (initData) {
+      headers['x-telegram-init-data'] = initData;
+    }
+    
     const res = await fetch(queryKey.join("/") as string, {
-      headers: {
-        'x-telegram-id': '123456789', // Demo user ID
-      },
+      headers,
       credentials: "include",
     });
 
