@@ -1,57 +1,40 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 from decimal import Decimal
-import json
 
+# User schemas
 class UserCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    telegram_id: str = Field(..., alias="telegramId")
+    telegram_id: str
     username: Optional[str] = None
-    first_name: Optional[str] = Field(None, alias="firstName")
-    last_name: Optional[str] = Field(None, alias="lastName")
-    init_data: Optional[str] = Field(None, alias="init_data")
-
-    def validate_init_data(self, bot_token: str):
-        from backend.telegram_auth import validate_telegram_data
-        if self.init_data:
-            user_data = validate_telegram_data(self.init_data, bot_token)
-            if not user_data:
-                raise ValueError("Invalid Telegram init_data")
-            self.telegram_id = str(user_data.get("id"))
-            self.username = user_data.get("username")
-            self.first_name = user_data.get("first_name")
-            self.last_name = user_data.get("last_name")
-        elif not self.telegram_id:
-            raise ValueError("telegram_id or init_data must be provided")
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 class UserUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
     username: Optional[str] = None
-    first_name: Optional[str] = Field(None, alias="firstName")
-    last_name: Optional[str] = Field(None, alias="lastName")
-    notifications_enabled: Optional[bool] = Field(None, alias="notificationsEnabled")
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    notifications_enabled: Optional[bool] = None
 
 class UserResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
-    telegram_id: str = Field(alias="telegramId")
+    telegram_id: str
     username: Optional[str]
-    first_name: Optional[str] = Field(alias="firstName")
-    last_name: Optional[str] = Field(alias="lastName")
-    stars_balance: int = Field(alias="starsBalance")
-    ton_balance: Decimal = Field(alias="tonBalance")
-    referral_code: Optional[str] = Field(alias="referralCode")
-    referred_by: Optional[str] = Field(alias="referredBy")
-    total_stars_earned: int = Field(alias="totalStarsEarned")
-    total_referral_earnings: int = Field(alias="totalReferralEarnings")
-    tasks_completed: int = Field(alias="tasksCompleted")
-    daily_earnings: int = Field(alias="dailyEarnings")
-    notifications_enabled: bool = Field(alias="notificationsEnabled")
-    created_at: datetime = Field(alias="createdAt")
+    first_name: Optional[str]
+    last_name: Optional[str]
+    stars_balance: int
+    ton_balance: Decimal
+    referral_code: Optional[str]
+    referred_by: Optional[str]
+    total_stars_earned: int
+    total_referral_earnings: int
+    tasks_completed: int
+    daily_earnings: int
+    notifications_enabled: bool
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 # Transaction schemas
 class TransactionCreate(BaseModel):
@@ -67,21 +50,22 @@ class TransactionCreate(BaseModel):
     invoice_id: Optional[str] = None
 
 class TransactionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
-    user_id: str = Field(alias="userId")
+    user_id: str
     type: str
     currency: str
     amount: Decimal
-    rub_amount: Optional[Decimal] = Field(None, alias="rubAmount")
+    rub_amount: Optional[Decimal]
     status: str
     description: Optional[str]
-    payment_system: Optional[str] = Field(None, alias="paymentSystem")
-    payment_url: Optional[str] = Field(None, alias="paymentUrl")
-    invoice_id: Optional[str] = Field(None, alias="invoiceId")
-    created_at: datetime = Field(alias="createdAt")
-    paid_at: Optional[datetime] = Field(None, alias="paidAt")
+    payment_system: Optional[str]
+    payment_url: Optional[str]
+    invoice_id: Optional[str]
+    created_at: datetime
+    paid_at: Optional[datetime]
+    
+    class Config:
+        from_attributes = True
 
 # Task schemas
 class TaskCreate(BaseModel):
@@ -93,18 +77,19 @@ class TaskCreate(BaseModel):
     is_active: Optional[bool] = True
 
 class TaskResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
     title: str
     description: str
     reward: int
     type: str
     action: Optional[str]
-    is_active: bool = Field(alias="isActive")
-    created_at: datetime = Field(alias="createdAt")
+    is_active: bool
+    created_at: datetime
     completed: Optional[bool] = False
-    completed_at: Optional[datetime] = Field(None, alias="completedAt")
+    completed_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
 
 # UserTask schemas
 class UserTaskCreate(BaseModel):
@@ -113,14 +98,15 @@ class UserTaskCreate(BaseModel):
     completed: Optional[bool] = False
 
 class UserTaskResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
-    user_id: str = Field(alias="userId")
-    task_id: str = Field(alias="taskId")
+    user_id: str
+    task_id: str
     completed: bool
-    completed_at: Optional[datetime] = Field(None, alias="completedAt")
-    created_at: datetime = Field(alias="createdAt")
+    completed_at: Optional[datetime]
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 # Setting schemas
 class SettingCreate(BaseModel):
@@ -131,12 +117,13 @@ class SettingUpdate(BaseModel):
     value: str
 
 class SettingResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
     key: str
     value: str
-    updated_at: datetime = Field(alias="updatedAt")
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 # Purchase schemas
 class PurchaseCalculate(BaseModel):
@@ -144,16 +131,16 @@ class PurchaseCalculate(BaseModel):
     amount: float = Field(..., gt=0)
 
 class PurchaseCalculateResponse(BaseModel):
-    base_price: str = Field(alias="basePrice")
-    markup_amount: str = Field(alias="markupAmount")
-    total_price: str = Field(alias="totalPrice")
+    base_price: str
+    markup_amount: str
+    total_price: str
     currency: str
     amount: float
 
 class PurchaseRequest(BaseModel):
     currency: str  # Will validate in endpoint logic
     amount: float = Field(..., gt=0)
-    rub_amount: float = Field(..., gt=0, alias="rubAmount")
+    rub_amount: float = Field(..., gt=0)
 
 class PurchaseResponse(BaseModel):
     transaction: TransactionResponse
@@ -161,36 +148,28 @@ class PurchaseResponse(BaseModel):
 
 # Referral schemas
 class ReferralStats(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    total_referrals: int = Field(alias="totalReferrals")
-    total_earnings: int = Field(alias="totalEarnings")
-    referral_code: Optional[str] = Field(alias="referralCode")
+    total_referrals: int
+    total_earnings: int
+    referral_code: Optional[str]
     referrals: list
 
 # Admin schemas
 class AdminStats(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    total_users: int = Field(alias="totalUsers")
-    today_sales: str = Field(alias="todaySales")
-    active_referrals: int = Field(alias="activeReferrals")
-    recent_transactions: list = Field(alias="recentTransactions")
+    total_users: int
+    today_sales: str
+    active_referrals: int
+    recent_transactions: list
 
 class AdminSettingsUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    stars_price: Optional[str] = Field(None, alias="starsPrice")
-    ton_price: Optional[str] = Field(None, alias="tonPrice")
-    markup_percentage: Optional[str] = Field(None, alias="markupPercentage")
+    stars_price: Optional[str] = None
+    ton_price: Optional[str] = None
+    markup_percentage: Optional[str] = None
 
 # Payment schemas
 class PaymentCreateResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    transaction_id: str = Field(alias="transactionId")
-    payment_url: str = Field(alias="paymentUrl")
-    invoice_id: str = Field(alias="invoiceId")
+    transaction_id: str
+    payment_url: str
+    invoice_id: str
     amount: str
     status: str
 
@@ -200,8 +179,6 @@ class PaymentWebhookData(BaseModel):
     SignatureValue: str
     
 class PaymentStatusResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    transaction_id: str = Field(alias="transactionId")
+    transaction_id: str
     status: str
-    paid_at: Optional[datetime] = Field(None, alias="paidAt")
+    paid_at: Optional[datetime] = None

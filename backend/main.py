@@ -63,42 +63,23 @@ async def get_authenticated_user(
 ) -> Optional[User]:
     return await get_current_user(storage, x_telegram_id, x_telegram_init_data)
 
+# User routes
 @app.post("/api/users", response_model=UserResponse)
 async def create_user(
     user_data: UserCreate,
     storage: Storage = Depends(get_storage)
 ):
     try:
-        logger.info(f"=== CREATE USER DEBUG ===")
-        logger.info(f"Received user_data: {user_data.dict()}")
-        logger.info(f"telegram_id: {user_data.telegram_id}")
-        logger.info(f"username: {user_data.username}")
-        logger.info(f"first_name: {user_data.first_name}")
-        logger.info(f"DEVELOPMENT mode: {os.getenv('DEVELOPMENT', 'false')}")
-        
-        # ✅ Проверка обязательных полей
-        if not user_data.telegram_id:
-            logger.error("telegram_id is required but missing")
-            raise HTTPException(status_code=400, detail="telegram_id is required")
-        
-        # Проверяем, существует ли пользователь
         existing_user = await storage.get_user_by_telegram_id(user_data.telegram_id)
         if existing_user:
-            logger.info(f"User already exists: {existing_user.telegram_id}")
             return existing_user
         
-        # Создаем нового пользователя
         user = await storage.create_user(user_data)
-        logger.info(f"Created user: {user.id} telegram_id: {user.telegram_id}")
+        logger.info(f"Created user: {user.id} telegramId: {user.telegram_id}")
         return user
-        
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error creating user: {e}")
-        logger.error(f"Exception type: {type(e)}")
-        logger.error(f"Exception args: {e.args}")
-        raise HTTPException(status_code=400, detail=f"Invalid user data: {str(e)}")
+        raise HTTPException(status_code=400, detail="Invalid user data")
 
 @app.get("/api/users/me", response_model=UserResponse)
 async def get_current_user_info(
