@@ -22,7 +22,42 @@ export default defineConfig({
     outDir: "dist", // Исправлено - относительный путь
     emptyOutDir: true,
     sourcemap: false,
-    minify: "terser",
+    
+    // ИСПРАВЛЕНИЕ: Заменяем terser на esbuild - быстрее и стабильнее
+    minify: "esbuild",
+    
+    // Добавляем оптимизации для предотвращения зависания
+    target: 'es2015',
+    chunkSizeWarningLimit: 1000,
+    
+    rollupOptions: {
+      // Ограничиваем параллельные операции для стабильности
+      maxParallelFileOps: 1,
+      
+      output: {
+        // Разделяем большие библиотеки в отдельные chunks
+        manualChunks: (id) => {
+          if (id.includes('node_modules')) {
+            // Группируем vendor библиотеки
+            if (id.includes('react') || id.includes('react-dom')) {
+              return 'react-vendor';
+            }
+            if (id.includes('@radix-ui')) {
+              return 'ui-vendor';
+            }
+            return 'vendor';
+          }
+        },
+        
+        // Оптимизируем имена файлов
+        chunkFileNames: (chunkInfo) => {
+          const facadeModuleId = chunkInfo.facadeModuleId
+            ? chunkInfo.facadeModuleId.split('/').pop()
+            : 'chunk';
+          return `${facadeModuleId}-[hash].js`;
+        }
+      }
+    }
   },
   server: {
     host: true,
@@ -34,4 +69,11 @@ export default defineConfig({
       },
     },
   },
+  
+  // Оптимизируем предварительную сборку зависимостей
+  optimizeDeps: {
+    include: ['react', 'react-dom'],
+    // Исключаем проблемные пакеты
+    exclude: ['@esbuild-kit/esm-loader', '@esbuild-kit/core-utils']
+  }
 });
