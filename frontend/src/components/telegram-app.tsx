@@ -20,7 +20,7 @@ export default function TelegramApp() {
   const [currentTab, setCurrentTab] = useState<TabType>('buy');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  
+
   const { user, isAvailable, hapticFeedback } = useTelegram();
   const { theme, toggleTheme, isDark } = useTheme();
   const { toast } = useToast();
@@ -46,10 +46,10 @@ export default function TelegramApp() {
   useEffect(() => {
     if (user && !currentUser && !userLoading) {
       createUserMutation.mutate({
-        telegramId: user.id.toString(),
+        telegram_id: user.id.toString(),
         username: user.username || null,
-        firstName: user.first_name,
-        lastName: user.last_name || null,
+        first_name: user.first_name,
+        last_name: user.last_name || null,
       });
     }
   }, [user, currentUser, userLoading]);
@@ -91,7 +91,7 @@ export default function TelegramApp() {
       <header className="sticky top-0 z-50 bg-white/80 dark:bg-[#0E0E10]/80 backdrop-blur-lg border-b border-gray-200 dark:border-white/10">
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center space-x-3">
-            <motion.div 
+            <motion.div
               className="w-8 h-8 bg-[#4E7FFF] rounded-lg flex items-center justify-center"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -109,7 +109,7 @@ export default function TelegramApp() {
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </motion.button>
-            <motion.div 
+            <motion.div
               className="w-8 h-8 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center cursor-pointer"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -136,8 +136,8 @@ export default function TelegramApp() {
             className="px-4"
           >
             {currentTab === 'buy' && (
-              <BuyTab 
-                user={currentUser} 
+              <BuyTab
+                user={currentUser}
                 onShowLoading={showLoadingModal}
                 onHideLoading={hideLoadingModal}
               />
@@ -172,11 +172,10 @@ export default function TelegramApp() {
             <motion.button
               key={tab.id}
               onClick={() => handleTabChange(tab.id as TabType)}
-              className={`flex flex-col items-center py-2 px-4 transition-colors ${
-                currentTab === tab.id 
-                  ? 'text-[#4E7FFF]' 
+              className={`flex flex-col items-center py-2 px-4 transition-colors ${currentTab === tab.id
+                  ? 'text-[#4E7FFF]'
                   : 'text-gray-500 dark:text-gray-400'
-              }`}
+                }`}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
@@ -189,9 +188,9 @@ export default function TelegramApp() {
 
 
       {/* Loading Modal */}
-      <LoadingModal 
-        isOpen={isLoading} 
-        message={loadingMessage} 
+      <LoadingModal
+        isOpen={isLoading}
+        message={loadingMessage}
       />
     </div>
   );
