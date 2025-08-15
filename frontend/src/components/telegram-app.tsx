@@ -12,7 +12,7 @@ import ProfileTab from "./profile-tab";
 import LoadingModal from "./loading-modal";
 import TelegramGuard from "./telegram-guard";
 import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Coins, TrendingUp } from "lucide-react";
-import type { User as UserType } from "../../shared/schema";
+import type { SnakeCaseUser, User as UserType } from "../../shared/schema";
 
 type TabType = 'buy' | 'earn' | 'sell' | 'profile';
 
@@ -38,8 +38,12 @@ export default function TelegramApp() {
   });
 
   // Get current user data
-  const { data: currentUser, isLoading: userLoading } = useQuery<UserType>({
+  const { data: currentUser, isLoading: userLoading } = useQuery<SnakeCaseUser>({
     queryKey: ['/api/users/me'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/users/me');
+      return response.json();
+    },
     enabled: !!user,
   });
 
@@ -173,8 +177,8 @@ export default function TelegramApp() {
               key={tab.id}
               onClick={() => handleTabChange(tab.id as TabType)}
               className={`flex flex-col items-center py-2 px-4 transition-colors ${currentTab === tab.id
-                  ? 'text-[#4E7FFF]'
-                  : 'text-gray-500 dark:text-gray-400'
+                ? 'text-[#4E7FFF]'
+                : 'text-gray-500 dark:text-gray-400'
                 }`}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
