@@ -8,10 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import type { User } from "@shared/schema";
+import type { SnakeCaseUser, User } from "@shared/schema";
+
 
 interface ProfileTabProps {
-  user?: User;
+  user?: SnakeCaseUser;
 }
 
 export default function ProfileTab({ user }: ProfileTabProps) {
@@ -28,14 +29,14 @@ export default function ProfileTab({ user }: ProfileTabProps) {
 
   const getUserInitials = () => {
     if (!user) return 'JD';
-    const first = user.firstName?.[0] || '';
-    const last = user.lastName?.[0] || '';
+    const first = user.first_name?.[0] || '';
+    const last = user.last_name?.[0] || '';
     return (first + last).toUpperCase() || user.username?.[0]?.toUpperCase() || 'U';
   };
 
   const copyReferralLink = async () => {
-    const referralLink = `https://t.me/starsexchange_bot?start=ref${user?.referralCode || '12345678'}`;
-    
+    const referralLink = `https://t.me/starsexchange_bot?start=ref${user?.referral_code || '12345678'}`;
+
     try {
       await navigator.clipboard.writeText(referralLink);
       hapticFeedback('success');
@@ -56,18 +57,18 @@ export default function ProfileTab({ user }: ProfileTabProps) {
     hapticFeedback('medium');
     shareApp('Попробуй этот крутой обменник Stars и TON! 🚀');
   };
-
+  console.log("user", user)
   return (
     <div className="space-y-4">
       {/* User Info */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
         <div className="flex items-center space-x-4 mb-4">
-          <motion.div 
+          <motion.div
             className="w-16 h-16 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center"
             whileHover={{ scale: 1.05 }}
           >
@@ -75,28 +76,28 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           </motion.div>
           <div>
             <h3 className="text-xl font-bold">
-              {user?.firstName} {user?.lastName}
+              {user?.first_name} {user?.last_name}
             </h3>
             <p className="text-gray-600 dark:text-gray-400">
               {user?.username ? `@${user.username}` : 'Пользователь'}
             </p>
             <p className="text-gray-600 dark:text-gray-400 text-sm">
-              ID: {user?.id || '12345678'}
+              ID: {user?.telegram_id || '12345678'}
             </p>
           </div>
         </div>
-        
+
         <div className="grid grid-cols-2 gap-4">
-          <motion.div 
+          <motion.div
             className="bg-gray-50 dark:bg-[#0E0E10] rounded-lg p-3 text-center"
             whileHover={{ scale: 1.02 }}
           >
             <p className="text-2xl font-bold text-yellow-500 flex items-center justify-center">
-              {user?.totalStarsEarned || 0} <Star className="w-5 h-5 ml-1" />
+              {user?.total_stars_earned || 0} <Star className="w-5 h-5 ml-1" />
             </p>
             <p className="text-gray-600 dark:text-gray-400 text-sm">Всего звезд</p>
           </motion.div>
-          <motion.div 
+          <motion.div
             className="bg-gray-50 dark:bg-[#0E0E10] rounded-lg p-3 text-center"
             whileHover={{ scale: 1.02 }}
           >
@@ -109,7 +110,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
       </motion.div>
 
       {/* Referral System */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -119,7 +120,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           <Users className="w-5 h-5 text-[#4E7FFF] mr-2" />
           Реферальная программа
         </h3>
-        
+
         <div className="bg-gradient-to-r from-[#4E7FFF]/20 to-purple-500/20 rounded-lg p-4 mb-4 border border-white/10">
           <p className="font-semibold mb-2">Зарабатывайте 10% с каждой покупки!</p>
           <p className="text-gray-600 dark:text-gray-400 text-sm">
@@ -134,7 +135,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
             </Label>
             <div className="flex mt-2">
               <Input
-                value={`https://t.me/starsexchange_bot?start=ref${user?.referralCode || '12345678'}`}
+                value={`https://t.me/starsexchange_bot?start=ref${user?.referral_code || '12345678'}`}
                 readOnly
                 className="flex-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20 text-sm text-gray-600 dark:text-gray-400"
               />
@@ -179,7 +180,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
       </motion.div>
 
       {/* Wallet Management */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -189,7 +190,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           <Wallet className="w-5 h-5 text-[#4E7FFF] mr-2" />
           Управление балансом
         </h3>
-        
+
         <div className="grid grid-cols-2 gap-3 mb-4">
           <Button
             onClick={() => hapticFeedback('light')}
@@ -217,13 +218,13 @@ export default function ProfileTab({ user }: ProfileTabProps) {
             TON покупки автоматически отправляются в ваш Telegram кошелек
           </p>
           <div className="mt-2 text-xs text-gray-500 dark:text-gray-500">
-            ID: {user?.telegramId || '123456789'}
+            ID: {user?.telegram_id || '123456789'}
           </div>
         </div>
       </motion.div>
 
       {/* Transaction History */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -233,7 +234,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           <History className="w-5 h-5 text-purple-500 mr-2" />
           История покупок
         </h3>
-        
+
         <div className="space-y-3">
           <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10">
             <div className="flex items-center space-x-3">
@@ -250,7 +251,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
               <p className="text-gray-600 dark:text-gray-400 text-sm">₽241.50</p>
             </div>
           </div>
-          
+
           <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
@@ -266,7 +267,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
               <p className="text-gray-600 dark:text-gray-400 text-sm">₽220.76</p>
             </div>
           </div>
-          
+
           <Button
             onClick={() => hapticFeedback('light')}
             variant="outline"
@@ -279,7 +280,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
       </motion.div>
 
       {/* Settings */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

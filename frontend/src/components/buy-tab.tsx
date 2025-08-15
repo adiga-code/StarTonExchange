@@ -8,10 +8,10 @@ import { Star, Bitcoin, ShoppingCart, Calculator, ExternalLink } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { User } from "@shared/schema";
+import type { SnakeCaseUser, User } from "@shared/schema";
 
 interface BuyTabProps {
-  user?: User;
+  user?: SnakeCaseUser;
   onShowLoading: (message: string) => void;
   onHideLoading: () => void;
 }
@@ -56,10 +56,10 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     onSuccess: (paymentData) => {
       // Redirect to payment page
       window.open(paymentData.payment_url, '_blank');
-      
+
       // Start polling for payment status
       pollPaymentStatus(paymentData.transaction_id);
-      
+
       toast({
         title: "Переходим к оплате",
         description: "Откройте новую вкладку для оплаты",
@@ -79,22 +79,22 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
   const pollPaymentStatus = async (transactionId: string) => {
     setIsProcessing(true);
     onShowLoading('Ожидаем оплату...');
-    
+
     const maxAttempts = 30; // 5 minutes with 10 second intervals
     let attempts = 0;
-    
+
     const checkStatus = async () => {
       try {
         const response = await apiRequest('GET', `/api/payment/status/${transactionId}`);
         const statusData = await response.json();
-        
+
         if (statusData.status === 'completed') {
           // Payment successful
           queryClient.invalidateQueries({ queryKey: ['/api/users/me'] });
           setAmount('');
           onHideLoading();
           setIsProcessing(false);
-          
+
           hapticFeedback('success');
           toast({
             title: "Оплата успешна!",
@@ -102,12 +102,12 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           });
           return;
         }
-        
+
         if (statusData.status === 'failed' || statusData.status === 'cancelled') {
           // Payment failed
           onHideLoading();
           setIsProcessing(false);
-          
+
           hapticFeedback('error');
           toast({
             title: "Оплата отменена",
@@ -116,7 +116,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           });
           return;
         }
-        
+
         // Still pending, continue polling
         attempts++;
         if (attempts < maxAttempts) {
@@ -131,7 +131,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
             variant: "destructive",
           });
         }
-        
+
       } catch (error) {
         console.error('Error checking payment status:', error);
         attempts++;
@@ -143,7 +143,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
         }
       }
     };
-    
+
     // Start checking after 5 seconds
     setTimeout(checkStatus, 5000);
   };
@@ -162,7 +162,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     if (!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing) return;
 
     hapticFeedback('medium');
-    
+
     try {
       await purchaseMutation.mutateAsync({
         currency: selectedCurrency,
@@ -179,14 +179,14 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     ton: 420.50,
   };
 
-  const quickBuyOptions = selectedCurrency === 'stars' 
+  const quickBuyOptions = selectedCurrency === 'stars'
     ? [100, 500, 1000, 2500]
     : [0.1, 0.5, 1, 2.5];
 
   return (
     <div className="space-y-4">
       {/* Currency Selector */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -199,11 +199,10 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
         <div className="grid grid-cols-2 gap-3">
           <motion.button
             onClick={() => handleCurrencySelect('stars')}
-            className={`p-4 rounded-xl border-2 transition-all ${
-              selectedCurrency === 'stars'
+            className={`p-4 rounded-xl border-2 transition-all ${selectedCurrency === 'stars'
                 ? 'border-[#4E7FFF] bg-[#4E7FFF]/10'
                 : 'border-gray-200 dark:border-white/10 hover:border-[#4E7FFF]/50'
-            }`}
+              }`}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             disabled={isProcessing}
@@ -214,11 +213,10 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           </motion.button>
           <motion.button
             onClick={() => handleCurrencySelect('ton')}
-            className={`p-4 rounded-xl border-2 transition-all ${
-              selectedCurrency === 'ton'
+            className={`p-4 rounded-xl border-2 transition-all ${selectedCurrency === 'ton'
                 ? 'border-[#4E7FFF] bg-[#4E7FFF]/10'
                 : 'border-gray-200 dark:border-white/10 hover:border-[#4E7FFF]/50'
-            }`}
+              }`}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             disabled={isProcessing}
@@ -231,7 +229,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       </motion.div>
 
       {/* Purchase Calculator */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -258,9 +256,9 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
               </div>
             </div>
           </div>
-          
+
           {priceCalculation && (
-            <motion.div 
+            <motion.div
               className="bg-gray-50 dark:bg-[#0E0E10] rounded-lg p-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -309,7 +307,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       </motion.div>
 
       {/* Quick Buy Options */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -340,7 +338,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       </motion.div>
 
       {/* Payment Info */}
-      <motion.div 
+      <motion.div
         className="bg-gradient-to-r from-green-500/20 to-blue-500/20 rounded-xl p-4 shadow-lg border border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -350,7 +348,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           🔒 Безопасная оплата
         </h4>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Оплата через проверенную платежную систему Robokassa. 
+          Оплата через проверенную платежную систему Robokassa.
           Принимаются карты, электронные кошельки и банковские переводы.
         </p>
       </motion.div>

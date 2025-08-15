@@ -6,10 +6,10 @@ import { useTelegram } from "@/hooks/use-telegram";
 import { CalendarDays, ThumbsUp, CheckCircle, Share, Users, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import type { User } from "@shared/schema";
+import type { SnakeCaseUser, User } from "@shared/schema";
 
 interface TasksTabProps {
-  user?: User;
+  user?: SnakeCaseUser;
 }
 
 interface TaskWithCompletion {
@@ -119,7 +119,7 @@ export default function TasksTab({ user }: TasksTabProps) {
     <div className="space-y-4">
       {/* Daily Tasks */}
       {dailyTasks.length > 0 && (
-        <motion.div 
+        <motion.div
           className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -133,7 +133,7 @@ export default function TasksTab({ user }: TasksTabProps) {
             {dailyTasks.map((task) => {
               const Icon = getTaskIcon(task.type, task.action);
               const iconColor = getTaskIconColor(task.type, task.action);
-              
+
               return (
                 <motion.div
                   key={task.id}
@@ -179,7 +179,7 @@ export default function TasksTab({ user }: TasksTabProps) {
 
       {/* Social Tasks */}
       {socialTasks.length > 0 && (
-        <motion.div 
+        <motion.div
           className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -193,7 +193,7 @@ export default function TasksTab({ user }: TasksTabProps) {
             {socialTasks.map((task) => {
               const Icon = getTaskIcon(task.type, task.action);
               const iconColor = getTaskIconColor(task.type, task.action);
-              
+
               return (
                 <motion.div
                   key={task.id}
@@ -238,7 +238,7 @@ export default function TasksTab({ user }: TasksTabProps) {
       )}
 
       {/* Progress */}
-      <motion.div 
+      <motion.div
         className="bg-gradient-to-r from-[#4E7FFF]/20 to-purple-500/20 rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -254,7 +254,7 @@ export default function TasksTab({ user }: TasksTabProps) {
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">Заработано сегодня</span>
             <span className="font-semibold text-yellow-500 flex items-center">
-              +{user?.dailyEarnings || 0} <Star className="w-4 h-4 ml-1" />
+              +{user?.daily_earnings || 0} <Star className="w-4 h-4 ml-1" />
             </span>
           </div>
         </div>
