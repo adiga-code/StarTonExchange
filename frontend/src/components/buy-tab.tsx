@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useTelegram } from "@/hooks/useTelegram";
+import { useTelegram } from "@/hooks/use-telegram";
 import { 
   Star, 
   Bitcoin, 
