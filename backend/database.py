@@ -24,62 +24,65 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-async def init_default_data():
-    """Initialize default data (settings, default tasks)"""
-    from storage import Storage
-    
+async def get_db():
+    """Dependency to get DB session"""
     async with AsyncSessionLocal() as session:
-        storage = Storage(session)
+        try:
+            yield session
+        finally:
+            await session.close()
+
+async def init_default_data():
+    """Initialize default settings and tasks"""
+    async with AsyncSessionLocal() as session:
+        from models import Setting, Task
+        from sqlalchemy import select
         
-        # Создать базовые настройки если их нет
-        settings_to_create = [
-            ("stars_price", "2.30"),
-            ("ton_price", "420.50"),
-            ("markup_percentage", "5.0"),
+        # Check if settings already exist
+        result = await session.execute(select(Setting))
+        if result.first():
+            return  # Data already initialized
+        
+        # Initialize default settings
+        default_settings = [
+            Setting(key="stars_price", value="2.30"),
+            Setting(key="ton_price", value="420.50"),
+            Setting(key="markup_percentage", value="5"),
         ]
         
-        for key, value in settings_to_create:
-            existing = await storage.get_setting(key)
-            if not existing:
-                await storage.create_setting(key, value)
+        for setting in default_settings:
+            session.add(setting)
         
-        # Создать базовые задания если их нет
-        existing_tasks = await storage.get_all_tasks()
-        if not existing_tasks:
-            default_tasks = [
-                {
-                    "title": "Ежедневный вход",
-                    "description": "Заходите в приложение каждый день и получайте награду",
-                    "reward": 10,
-                    "type": "daily",
-                    "action": "daily_login",
-                    "is_active": True
-                },
-                {
-                    "title": "Поделиться приложением",
-                    "description": "Поделитесь приложением с друзьями",
-                    "reward": 25,
-                    "type": "social",
-                    "action": "share_app",
-                    "is_active": True
-                },
-                {
-                    "title": "Подписаться на канал",
-                    "description": "Подпишитесь на наш новостной канал в Telegram",
-                    "reward": 50,
-                    "type": "social",
-                    "action": "follow_channel",
-                    "is_active": True
-                },
-                {
-                    "title": "Пригласить друга",
-                    "description": "Пригласите друга и получите бонус",
-                    "reward": 100,
-                    "type": "referral",
-                    "action": "invite_friends",
-                    "is_active": True
-                }
-            ]
-            
-            for task_data in default_tasks:
-                await storage.create_task(task_data)
+        # Initialize default tasks
+        default_tasks = [
+            Task(
+                title="Ежедневный вход",
+                description="Заходите каждый день",
+                reward=10,
+                type="daily",
+                action="daily_login",
+                is_active=True,
+            ),
+            Task(
+                title="Поделиться с другом",
+                description="Пригласите 1 друга",
+                reward=25,
+                type="referral",
+                action="share_app",
+                is_active=True,
+            ),
+            Task(
+                title="Подписаться на канал",
+                description="@starsexchange_news",
+                reward=50,
+                type="social",
+                action="follow_channel",
+                is_active=True,
+            ),
+        ]
+        
+        for task in default_tasks:
+            session.add(task)
+        
+        await session.commit()
+        print("Default data initialized")

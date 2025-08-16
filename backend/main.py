@@ -1,364 +1,440 @@
-import os
-import json
-import logging
-from datetime import date, datetime, timedelta
-from typing import Optional, List, Dict, Any
-from decimal import Decimal
-
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, Depends, HTTPException, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-import uvicorn
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional, List
+import asyncio
+import os
+import logging
+from datetime import datetime, date
+from decimal import Decimal
+from dotenv import load_dotenv
 
-from database import AsyncSessionLocal, init_db, init_default_data
+# Load environment variables
+load_dotenv()
+
+from database import get_db, init_db, init_default_data, AsyncSessionLocal
 from storage import Storage
-from schemas import *
 from telegram_auth import get_current_user
+from robokassa import get_robokassa
+from schemas import *
 from models import User
+import json
 
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
-app = FastAPI()
+app = FastAPI(title="Stars Exchange API", version="1.0.0")
 
-# CORS middleware
+# CORS middleware for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # Vite dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Dependency to get database session
-async def get_storage():
-    async with AsyncSessionLocal() as session:
-        yield Storage(session)
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = datetime.now()
+    
+    response = await call_next(request)
+    
+    duration = (datetime.now() - start_time).total_seconds() * 1000
+    
+    if request.url.path.startswith("/api"):
+        logger.info(f"{request.method} {request.url.path} {response.status_code} in {duration:.0f}ms")
+    
+    return response
 
-# Новые схемы для задач
-class TaskCreateRequest(BaseModel):
-    title: str = Field(..., min_length=1, max_length=200)
-    description: str = Field(..., min_length=1, max_length=1000)
-    reward: int = Field(..., gt=0, le=10000)
-    type: str = Field(..., pattern="^(daily|social|referral)$")  # Заменили regex на pattern
-    action: Optional[str] = Field(None, max_length=100)
-    is_active: bool = True
+# Dependency to get storage
+async def get_storage(db: AsyncSession = Depends(get_db)):
+    return Storage(db)
 
-class TaskUpdateRequest(BaseModel):
-    title: Optional[str] = Field(None, min_length=1, max_length=200)
-    description: Optional[str] = Field(None, min_length=1, max_length=1000)
-    reward: Optional[int] = Field(None, gt=0, le=10000)
-    type: Optional[str] = Field(None, pattern="^(daily|social|referral)$")  # Заменили regex на pattern
-    action: Optional[str] = Field(None, max_length=100)
-    is_active: Optional[bool] = None
+# Dependency to get current user
+async def get_authenticated_user(
+    storage: Storage = Depends(get_storage),
+    x_telegram_init_data: Optional[str] = Header(None)
+) -> User:
+    user = await get_current_user(storage, None, x_telegram_init_data)
+    if not user:
+        raise HTTPException(status_code=403, detail="Invalid or missing Telegram authentication data")
+    return user
 
-# Схема для поиска пользователя
-class UserProfileResponse(BaseModel):
-    telegram_id: str
-    username: Optional[str]
-    first_name: str
-    last_name: Optional[str]
-    profile_photo: Optional[str]
-
-# Обновленная схема покупки
-class PurchaseRequest(BaseModel):
-    currency: str
-    amount: float = Field(..., gt=0)
-    rub_amount: float = Field(..., gt=0)
-    target_user_id: Optional[str] = None  # ID получателя
-
-# Health check
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
-
-# User endpoints
-@app.get("/api/users/me")
-async def get_current_user_profile(storage: Storage = Depends(get_storage)):
-    try:
-        # В тестовом режиме возвращаем mock пользователя
-        if os.getenv("DEVELOPMENT"):
-            return {
-                "id": "test-user-id",
-                "telegram_id": "123456789",
-                "username": "testuser",
-                "first_name": "Test",
-                "last_name": "User",
-                "stars_balance": 100,
-                "ton_balance": "0.5",
-                "referral_code": "TEST123",
-                "total_stars_earned": 250,
-                "total_referral_earnings": 50,
-                "tasks_completed": 5,
-            }
-        
-        # TODO: Получить пользователя из Telegram headers
-        # user = await get_current_user(storage, telegram_id, init_data)
-        # return user if user else HTTPException(401, "Unauthorized")
-        
-        raise HTTPException(status_code=501, detail="Not implemented")
-    except Exception as e:
-        logger.error(f"Error getting user profile: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get user profile")
-
-@app.get("/api/users/search/{username}")
-async def search_user_by_username(
-    username: str,
-    storage: Storage = Depends(get_storage)
-):
-    """Поиск пользователя по username и получение его аватарки"""
-    try:
-        # Получить пользователя из базы данных
-        user = await storage.get_user_by_username(username)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        # Получить фото профиля через Telegram Bot API
-        profile_photo_url = None
-        try:
-            bot_token = os.getenv('BOT_TOKEN')
-            if bot_token:
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    # Получить фото профиля пользователя
-                    async with session.get(
-                        f"https://api.telegram.org/bot{bot_token}/getUserProfilePhotos",
-                        params={"user_id": user.telegram_id, "limit": 1}
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            if data.get("ok") and data.get("result", {}).get("photos"):
-                                # Получить file_id первого фото
-                                file_id = data["result"]["photos"][0][0]["file_id"]
-                                
-                                # Получить file_path
-                                async with session.get(
-                                    f"https://api.telegram.org/bot{bot_token}/getFile",
-                                    params={"file_id": file_id}
-                                ) as file_response:
-                                    if file_response.status == 200:
-                                        file_data = await file_response.json()
-                                        if file_data.get("ok"):
-                                            file_path = file_data["result"]["file_path"]
-                                            profile_photo_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
-        except Exception as e:
-            logger.error(f"Error getting profile photo: {e}")
-        
-        return UserProfileResponse(
-            telegram_id=user.telegram_id,
-            username=user.username,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            profile_photo=profile_photo_url
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error searching user: {e}")
-        raise HTTPException(status_code=500, detail="Failed to search user")
-
-# Task endpoints
-@app.get("/api/tasks")
-async def get_user_tasks(storage: Storage = Depends(get_storage)):
-    try:
-        # TODO: Получить текущего пользователя
-        # user = await get_current_user(storage, ...)
-        # В тестовом режиме возвращаем mock задачи
-        if os.getenv("DEVELOPMENT"):
-            return [
-                {
-                    "id": "task-1",
-                    "title": "Ежедневный вход",
-                    "description": "Заходите в приложение каждый день",
-                    "reward": 10,
-                    "type": "daily",
-                    "action": "daily_login",
-                    "completed": False,
-                    "completedAt": None,
-                },
-                {
-                    "id": "task-2",
-                    "title": "Поделиться приложением",
-                    "description": "Поделитесь приложением с друзьями",
-                    "reward": 25,
-                    "type": "social",
-                    "action": "share_app",
-                    "completed": True,
-                    "completedAt": "2025-01-15T10:30:00Z",
-                },
-            ]
-        
-        tasks = await storage.get_active_tasks()
-        # TODO: Добавить информацию о выполнении для текущего пользователя
-        return tasks
-    except Exception as e:
-        logger.error(f"Error getting tasks: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get tasks")
-
-@app.post("/api/tasks/{task_id}/complete")
-async def complete_task(task_id: str, storage: Storage = Depends(get_storage)):
-    try:
-        # TODO: Получить текущего пользователя и выполнить задание
-        # user = await get_current_user(storage, ...)
-        # task = await storage.get_task(task_id)
-        # await storage.complete_user_task(user.id, task_id)
-        # await storage.add_user_stars(user.id, task.reward)
-        
-        # В тестовом режиме возвращаем успех
-        if os.getenv("DEVELOPMENT"):
-            return {"success": True, "reward": 25}
-        
-        raise HTTPException(status_code=501, detail="Not implemented")
-    except Exception as e:
-        logger.error(f"Error completing task: {e}")
-        raise HTTPException(status_code=500, detail="Failed to complete task")
-
-# Purchase endpoints
-@app.post("/api/purchase/calculate")
-async def calculate_purchase_price(
-    request: PurchaseCalculate,
+# User routes
+@app.post("/api/users", response_model=UserResponse)
+async def create_user(
+    user_data: UserCreate,
     storage: Storage = Depends(get_storage)
 ):
     try:
-        # Получить настройки цен
+        existing_user = await storage.get_user_by_telegram_id(user_data.telegram_id)
+        if existing_user:
+            return existing_user
+        
+        user = await storage.create_user(user_data)
+        logger.info(f"Created user: {user.id} telegramId: {user.telegram_id}")
+        return user
+    except Exception as e:
+        logger.error(f"Error creating user: {e}")
+        raise HTTPException(status_code=400, detail="Invalid user data")
+
+@app.get("/api/users/me", response_model=UserResponse)
+async def get_current_user_info(
+    current_user: User = Depends(get_authenticated_user)
+):
+    return current_user
+
+@app.put("/api/users/me", response_model=UserResponse)
+async def update_current_user(
+    updates: UserUpdate,
+    current_user: User = Depends(get_authenticated_user),
+    storage: Storage = Depends(get_storage)
+):
+    update_dict = {k: v for k, v in updates.dict().items() if v is not None}
+    updated_user = await storage.update_user(current_user.id, update_dict)
+    return updated_user
+
+# Purchase routes
+@app.post("/api/purchase/calculate", response_model=PurchaseCalculateResponse)
+async def calculate_purchase(
+    purchase_data: PurchaseCalculate,
+    storage: Storage = Depends(get_storage)
+):
+    try:
+        # Validate currency
+        if purchase_data.currency not in ['stars', 'ton']:
+            raise HTTPException(status_code=400, detail="Invalid currency. Must be 'stars' or 'ton'")
+        
         stars_price_setting = await storage.get_setting("stars_price")
         ton_price_setting = await storage.get_setting("ton_price")
         markup_setting = await storage.get_setting("markup_percentage")
         
-        stars_price = float(stars_price_setting.value) if stars_price_setting else 2.30
-        ton_price = float(ton_price_setting.value) if ton_price_setting else 420.50
-        markup_percentage = float(markup_setting.value) if markup_setting else 5.0
+        prices = {
+            "stars": float(stars_price_setting.value if stars_price_setting else "2.30"),
+            "ton": float(ton_price_setting.value if ton_price_setting else "420.50"),
+        }
         
-        # Рассчитать цену
-        if request.currency == "stars":
-            base_price = stars_price * request.amount
-        elif request.currency == "ton":
-            base_price = ton_price * request.amount
-        else:
-            raise HTTPException(status_code=400, detail="Invalid currency")
+        markup = float(markup_setting.value if markup_setting else "5") / 100
         
-        markup_amount = base_price * (markup_percentage / 100)
+        base_price = purchase_data.amount * prices[purchase_data.currency]
+        markup_amount = base_price * markup
         total_price = base_price + markup_amount
         
         return PurchaseCalculateResponse(
             base_price=f"{base_price:.2f}",
             markup_amount=f"{markup_amount:.2f}",
             total_price=f"{total_price:.2f}",
-            currency=request.currency,
-            amount=request.amount
+            currency=purchase_data.currency,
+            amount=purchase_data.amount
         )
     except Exception as e:
         logger.error(f"Error calculating price: {e}")
         raise HTTPException(status_code=500, detail="Failed to calculate price")
 
-@app.post("/api/purchase")
-async def create_purchase(
-    request: PurchaseRequest,
+@app.post("/api/purchase", response_model=PaymentCreateResponse)
+async def make_purchase(
+    purchase_data: PurchaseRequest,
+    current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    """Создать покупку для указанного пользователя"""
     try:
-        # Валидация валюты
-        if request.currency not in ["stars", "ton"]:
-            raise HTTPException(status_code=400, detail="Invalid currency")
+        # Validate currency
+        if purchase_data.currency not in ['stars', 'ton']:
+            raise HTTPException(status_code=400, detail="Invalid currency. Must be 'stars' or 'ton'")
         
-        # Получить целевого пользователя (получателя)
-        target_user = None
-        if request.target_user_id:
-            target_user = await storage.get_user_by_telegram_id(request.target_user_id)
-            if not target_user:
-                raise HTTPException(status_code=404, detail="Target user not found")
-        else:
-            # Если не указан получатель, использовать текущего пользователя
-            # TODO: получить из текущего контекста
-            raise HTTPException(status_code=400, detail="Target user required")
+        robokassa = get_robokassa()
+        if not robokassa:
+            raise HTTPException(status_code=500, detail="Payment system not configured")
         
-        # Создать транзакцию
+        # Generate unique invoice ID
+        import uuid
+        invoice_id = str(uuid.uuid4())
+        
+        # Create transaction record
         transaction_data = TransactionCreate(
-            user_id=target_user.id,
-            type=f"buy_{request.currency}",
-            currency=request.currency,
-            amount=Decimal(str(request.amount)),
-            rub_amount=Decimal(str(request.rub_amount)),
+            user_id=current_user.id,
+            type="buy_stars" if purchase_data.currency == "stars" else "buy_ton",
+            currency=purchase_data.currency,
+            amount=Decimal(str(purchase_data.amount)),
+            rub_amount=Decimal(str(purchase_data.rub_amount)),
             status="pending",
-            description=f"Покупка {request.amount} {request.currency}",
-            payment_system="fragment_api" if request.currency == "stars" else "robokassa"
+            description=f"Purchase {purchase_data.amount} {purchase_data.currency}",
+            payment_system="robokassa",
+            invoice_id=invoice_id
         )
         
         transaction = await storage.create_transaction(transaction_data)
         
-        # Для звезд - использовать Fragment API
-        if request.currency == "stars":
-            # TODO: Интеграция с Fragment API
-            # payment_url = await create_fragment_payment(transaction.id, request.amount, request.rub_amount)
-            payment_url = f"https://fragment.com/pay?amount={request.rub_amount}&stars={request.amount}&invoice_id={transaction.id}"
-        else:
-            # Для TON - использовать Робокассу
-            # TODO: Интеграция с Робокассой
-            payment_url = f"https://robokassa.com/pay?amount={request.rub_amount}&invoice_id={transaction.id}"
-        
-        # Обновить транзакцию с URL платежа
-        await storage.update_transaction(transaction.id, {
-            "payment_url": payment_url,
-            "invoice_id": transaction.id
-        })
-        
-        return PurchaseResponse(
-            transaction=TransactionResponse.from_orm(transaction),
-            status="created",
-            payment_url=payment_url
+        # Create payment URL
+        payment_url = robokassa.create_payment_url(
+            invoice_id=invoice_id,
+            amount=Decimal(str(purchase_data.rub_amount)),
+            description=f"Purchase {purchase_data.amount} {purchase_data.currency}",
+            user_email=f"{current_user.telegram_id}@telegram.user"
         )
+        
+        # Update transaction with payment URL
+        await storage.update_transaction(transaction.id, {"payment_url": payment_url})
+        
+        logger.info(f"Created payment for user {current_user.telegram_id}: {purchase_data.rub_amount} RUB")
+        
+        return PaymentCreateResponse(
+            transaction_id=transaction.id,
+            payment_url=payment_url,
+            invoice_id=invoice_id,
+            amount=str(purchase_data.rub_amount),
+            status="pending"
+        )
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating purchase: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create purchase")
+        logger.error(f"Error creating payment: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create payment")
 
-@app.get("/api/purchase/status/{transaction_id}")
-async def get_purchase_status(
-    transaction_id: str,
+# Tasks routes
+@app.get("/api/tasks", response_model=List[TaskResponse])
+async def get_tasks(
+    current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
     try:
-        transaction = await storage.get_transaction(transaction_id)
-        if not transaction:
-            raise HTTPException(status_code=404, detail="Transaction not found")
+        tasks = await storage.get_active_tasks()
+        user_tasks = await storage.get_user_tasks(current_user.id)
+        user_task_map = {ut.task_id: ut for ut in user_tasks}
+
+        tasks_with_completion = []
+        for task in tasks:
+            user_task = user_task_map.get(task.id)
+            task_dict = task.__dict__
+            task_dict['completed'] = user_task.completed if user_task else False
+            task_dict['completed_at'] = user_task.completed_at if user_task else None
+            tasks_with_completion.append(TaskResponse(**task_dict))
+
+        return tasks_with_completion
+    except Exception as e:
+        logger.error(f"Error getting tasks: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get tasks")
+
+@app.post("/api/tasks/{task_id}/complete")
+async def complete_task(
+    task_id: str,
+    current_user: User = Depends(get_authenticated_user),
+    storage: Storage = Depends(get_storage)
+):
+    try:
+        task = await storage.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
         
-        return {
-            "transaction_id": transaction.id,
-            "status": transaction.status,
-            "created_at": transaction.created_at.isoformat(),
-            "paid_at": transaction.paid_at.isoformat() if transaction.paid_at else None
+        # Check if task already completed
+        existing_user_task = await storage.get_user_task(current_user.id, task_id)
+        if existing_user_task and existing_user_task.completed:
+            raise HTTPException(status_code=400, detail="Task already completed")
+        
+        # Create user task if it doesn't exist
+        if not existing_user_task:
+            user_task_data = UserTaskCreate(user_id=current_user.id, task_id=task_id)
+            await storage.create_user_task(user_task_data)
+        
+        # Complete the task
+        completed_task = await storage.complete_user_task(current_user.id, task_id)
+        if not completed_task:
+            raise HTTPException(status_code=500, detail="Failed to complete task")
+        
+        # Reward user
+        updates = {
+            "stars_balance": current_user.stars_balance + task.reward,
+            "total_stars_earned": current_user.total_stars_earned + task.reward,
+            "tasks_completed": current_user.tasks_completed + 1,
+            "daily_earnings": current_user.daily_earnings + task.reward
         }
+        await storage.update_user(current_user.id, updates)
+        
+        # Create reward transaction
+        transaction_data = TransactionCreate(
+            user_id=current_user.id,
+            type="task_reward",
+            currency="stars",
+            amount=Decimal(str(task.reward)),
+            status="completed",
+            description=f"Task reward: {task.title}"
+        )
+        await storage.create_transaction(transaction_data)
+        
+        return {"success": True, "reward": task.reward}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting purchase status: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get purchase status")
+        logger.error(f"Error completing task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to complete task")
 
-# Referral endpoints
-@app.get("/api/referrals/stats")
-async def get_referral_stats(storage: Storage = Depends(get_storage)):
+# Referral routes
+@app.get("/api/referrals/stats", response_model=ReferralStats)
+async def get_referral_stats(
+    current_user: User = Depends(get_authenticated_user),
+    storage: Storage = Depends(get_storage)
+):
     try:
-        # TODO: Получить статистику рефералов для текущего пользователя
+        all_users = await storage.get_all_users()
+        referrals = [u for u in all_users if u.referred_by == current_user.id]
+        
+        referral_list = []
+        for r in referrals:
+            referral_list.append({
+                "id": r.id,
+                "username": r.username,
+                "first_name": r.first_name,
+                "created_at": r.created_at.isoformat()
+            })
+        
         return ReferralStats(
-            total_referrals=0,
-            total_earnings=0,
-            referral_code="TEST123"
+            total_referrals=len(referrals),
+            total_earnings=current_user.total_referral_earnings or 0,
+            referral_code=current_user.referral_code,
+            referrals=referral_list
         )
     except Exception as e:
         logger.error(f"Error getting referral stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to get referral stats")
 
-# Admin endpoints
-@app.get("/api/admin/stats")
+# Payment webhook and status routes
+@app.post("/api/payment/webhook/robokassa")
+async def robokassa_webhook(
+    request: Request,
+    storage: Storage = Depends(get_storage)
+):
+    """Handle Robokassa payment webhook"""
+    try:
+        robokassa = get_robokassa()
+        if not robokassa:
+            raise HTTPException(status_code=500, detail="Payment system not configured")
+        
+        # Parse form data
+        form_data = await request.form()
+        webhook_data = dict(form_data)
+        
+        logger.info(f"Received Robokassa webhook: {webhook_data}")
+        
+        # Verify signature
+        if not robokassa.verify_payment_result(webhook_data):
+            logger.error("Invalid Robokassa signature")
+            raise HTTPException(status_code=400, detail="Invalid signature")
+        
+        invoice_id = webhook_data.get('InvId')
+        out_sum = webhook_data.get('OutSum')
+        
+        if not invoice_id:
+            raise HTTPException(status_code=400, detail="Missing InvId")
+        
+        # Find transaction by invoice_id
+        from sqlalchemy import select
+        from models import Transaction
+        
+        result = await storage.db.execute(
+            select(Transaction).where(Transaction.invoice_id == invoice_id)
+        )
+        transaction = result.scalar_one_or_none()
+        
+        if not transaction:
+            logger.error(f"Transaction not found for invoice_id: {invoice_id}")
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        
+        # Update transaction status
+        updates = {
+            "status": "completed",
+            "paid_at": datetime.utcnow(),
+            "payment_data": json.dumps(webhook_data)
+        }
+        
+        await storage.update_transaction(transaction.id, updates)
+        
+        # Update user balance
+        user = await storage.get_user(transaction.user_id)
+        if user and transaction.type in ["buy_stars", "buy_ton"]:
+            if transaction.currency == "stars":
+                user_updates = {
+                    "stars_balance": user.stars_balance + int(transaction.amount),
+                    "total_stars_earned": user.total_stars_earned + int(transaction.amount)
+                }
+                await storage.update_user(user.id, user_updates)
+                logger.info(f"Added {transaction.amount} stars to user {user.telegram_id}")
+            elif transaction.currency == "ton":
+                logger.info(f"TON purchase completed for user {user.telegram_id}: {transaction.amount} TON")
+                # TON is sent to Telegram wallet - no balance update needed
+            
+            logger.info(f"Payment completed for invoice {invoice_id}, amount: {out_sum} RUB")
+        
+        return {"status": "OK"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        raise HTTPException(status_code=500, detail="Webhook processing failed")
+
+@app.get("/api/payment/status/{transaction_id}", response_model=PaymentStatusResponse)
+async def get_payment_status(
+    transaction_id: str,
+    current_user: User = Depends(get_authenticated_user),
+    storage: Storage = Depends(get_storage)
+):
+    """Get payment status for transaction"""
+    try:
+        transaction = await storage.get_transaction(transaction_id)
+        
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        
+        # Check if transaction belongs to current user
+        if transaction.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # If pending and has invoice_id, check with payment system
+        if transaction.status == "pending" and transaction.invoice_id:
+            robokassa = get_robokassa()
+            if robokassa:
+                payment_status = await robokassa.check_payment_status(transaction.invoice_id)
+                
+                if payment_status and payment_status['status'] == 'paid':
+                    # Update transaction status
+                    updates = {
+                        "status": "completed",
+                        "paid_at": datetime.utcnow(),
+                        "payment_data": payment_status['response']
+                    }
+                    await storage.update_transaction(transaction.id, updates)
+                    
+                    # Update user balance
+                    if transaction.currency == "stars":
+                        user_updates = {
+                            "stars_balance": current_user.stars_balance + int(transaction.amount),
+                            "total_stars_earned": current_user.total_stars_earned + int(transaction.amount)
+                        }
+                        await storage.update_user(current_user.id, user_updates)
+                    
+                    transaction.status = "completed"
+                    transaction.paid_at = datetime.utcnow()
+        
+        return PaymentStatusResponse(
+            transaction_id=transaction.id,
+            status=transaction.status,
+            paid_at=transaction.paid_at
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting payment status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get payment status")
+
+# Admin routes
+@app.get("/api/admin/stats", response_model=AdminStats)
 async def get_admin_stats(storage: Storage = Depends(get_storage)):
     try:
         users = await storage.get_all_users()
@@ -415,127 +491,6 @@ async def update_admin_settings(
         logger.error(f"Error updating settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to update settings")
 
-# Новые эндпоинты для управления задачами
-@app.get("/api/admin/tasks")
-async def get_admin_tasks(storage: Storage = Depends(get_storage)):
-    """Получить все задачи для админ панели"""
-    try:
-        tasks = await storage.get_all_tasks()
-        return [
-            {
-                "id": task.id,
-                "title": task.title,
-                "description": task.description,
-                "reward": task.reward,
-                "type": task.type,
-                "action": task.action,
-                "is_active": task.is_active,
-                "created_at": task.created_at.isoformat()
-            }
-            for task in tasks
-        ]
-    except Exception as e:
-        logger.error(f"Error getting admin tasks: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get tasks")
-
-@app.post("/api/admin/tasks")
-async def create_admin_task(
-    task_data: TaskCreateRequest,
-    storage: Storage = Depends(get_storage)
-):
-    """Создать новое задание"""
-    try:
-        task = await storage.create_task({
-            "title": task_data.title,
-            "description": task_data.description,
-            "reward": task_data.reward,
-            "type": task_data.type,
-            "action": task_data.action,
-            "is_active": task_data.is_active
-        })
-        
-        return {
-            "id": task.id,
-            "title": task.title,
-            "description": task.description,
-            "reward": task.reward,
-            "type": task.type,
-            "action": task.action,
-            "is_active": task.is_active,
-            "created_at": task.created_at.isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Error creating task: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create task")
-
-@app.put("/api/admin/tasks/{task_id}")
-async def update_admin_task(
-    task_id: str,
-    task_data: TaskUpdateRequest,
-    storage: Storage = Depends(get_storage)
-):
-    """Обновить задание"""
-    try:
-        # Получить существующее задание
-        existing_task = await storage.get_task(task_id)
-        if not existing_task:
-            raise HTTPException(status_code=404, detail="Task not found")
-        
-        # Подготовить данные для обновления
-        updates = {}
-        if task_data.title is not None:
-            updates["title"] = task_data.title
-        if task_data.description is not None:
-            updates["description"] = task_data.description
-        if task_data.reward is not None:
-            updates["reward"] = task_data.reward
-        if task_data.type is not None:
-            updates["type"] = task_data.type
-        if task_data.action is not None:
-            updates["action"] = task_data.action
-        if task_data.is_active is not None:
-            updates["is_active"] = task_data.is_active
-        
-        updated_task = await storage.update_task(task_id, updates)
-        
-        return {
-            "id": updated_task.id,
-            "title": updated_task.title,
-            "description": updated_task.description,
-            "reward": updated_task.reward,
-            "type": updated_task.type,
-            "action": updated_task.action,
-            "is_active": updated_task.is_active,
-            "created_at": updated_task.created_at.isoformat()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating task: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update task")
-
-@app.delete("/api/admin/tasks/{task_id}")
-async def delete_admin_task(
-    task_id: str,
-    storage: Storage = Depends(get_storage)
-):
-    """Удалить задание"""
-    try:
-        task = await storage.get_task(task_id)
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found")
-        
-        success = await storage.delete_task(task_id)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to delete task")
-        
-        return {"success": True}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting task: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete task")
-
 # Static files for production
 if not os.getenv("DEVELOPMENT"):
     app.mount("/", StaticFiles(directory="dist/public", html=True), name="static")
@@ -552,6 +507,7 @@ async def startup_event():
     logger.info("Database initialized")
 
 if __name__ == "__main__":
+    import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(
         "main:app",
