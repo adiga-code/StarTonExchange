@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 import asyncio
 import os
+import httpx
 import logging
 from datetime import datetime, date
 from decimal import Decimal
@@ -98,6 +99,70 @@ async def update_current_user(
     update_dict = {k: v for k, v in updates.dict().items() if v is not None}
     updated_user = await storage.update_user(current_user.id, update_dict)
     return updated_user
+
+@app.get("/api/getPhoto")
+async def get_photo(
+    username: str,
+    storage: Storage = Depends(get_storage)
+):
+    try:
+        # Ищем пользователя по username
+        user = await storage.get_user_by_username(username)
+        if not user:
+            return {"error": "User not found", "success": False}
+        
+        # Получаем BOT_TOKEN из переменных окружения
+        bot_token = os.getenv('BOT_TOKEN')
+        if not bot_token:
+            logger.error("BOT_TOKEN not configured")
+            return {"error": "Bot not configured", "success": False}
+        
+        logger.info(f"Getting photo for user {username} (telegram_id: {user.telegram_id})")
+        
+        async with httpx.AsyncClient() as client:
+            # Получаем фото профиля
+            photos_response = await client.get(
+                f"https://api.telegram.org/bot{bot_token}/getUserProfilePhotos",
+                params={"user_id": user.telegram_id, "limit": 1}
+            )
+            photos_data = photos_response.json()
+            
+            if not photos_data.get("ok"):
+                logger.warning(f"Telegram API error: {photos_data}")
+                return {"error": "Cannot access Telegram API", "success": False}
+            
+            if not photos_data["result"]["photos"]:
+                logger.info(f"No photos found for user {username}")
+                return {"error": "No photo found", "success": False}
+            
+            # Получаем файл (берем самое большое фото)
+            file_id = photos_data["result"]["photos"][0][-1]["file_id"]
+            file_response = await client.get(
+                f"https://api.telegram.org/bot{bot_token}/getFile",
+                params={"file_id": file_id}
+            )
+            file_data = file_response.json()
+            
+            if not file_data.get("ok"):
+                logger.warning(f"Cannot get file: {file_data}")
+                return {"error": "Cannot get file", "success": False}
+            
+            photo_url = f"https://api.telegram.org/file/bot{bot_token}/{file_data['result']['file_path']}"
+            
+            logger.info(f"Successfully got photo for user {username}")
+            return {
+                "photo_url": photo_url,
+                "first_name": user.first_name,
+                "success": True
+            }
+            
+    except httpx.RequestError as e:
+        logger.error(f"Network error getting photo for {username}: {e}")
+        return {"error": "Network error", "success": False}
+    except Exception as e:
+        logger.error(f"Error getting photo for {username}: {e}")
+        return {"error": "User not found", "success": False}
+
 
 # Purchase routes
 @app.post("/api/purchase/calculate", response_model=PurchaseCalculateResponse)
