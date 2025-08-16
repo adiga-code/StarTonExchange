@@ -1,110 +1,161 @@
-import { useState } from "react";
-import { motion } from "framer-motion";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useTelegram } from "@/hooks/use-telegram";
-import { Star, Bitcoin, ShoppingCart, Calculator, ExternalLink } from "lucide-react";
+import { useTelegram } from "@/hooks/useTelegram";
+import { 
+  Star, 
+  Bitcoin, 
+  Calculator, 
+  Copy, 
+  User, 
+  X, 
+  Search,
+  UserCheck,
+  UserX,
+  Loader2
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { SnakeCaseUser, User } from "@shared/schema";
-
-interface BuyTabProps {
-  user?: SnakeCaseUser;
-  onShowLoading: (message: string) => void;
-  onHideLoading: () => void;
-}
 
 type Currency = 'stars' | 'ton';
 
-interface PaymentResponse {
-  transaction_id: string;
-  payment_url: string;
-  invoice_id: string;
-  amount: string;
-  status: string;
+interface BuyTabProps {
+  user: any;
+  onShowLoading: () => void;
+  onHideLoading: () => void;
+}
+
+interface TargetUser {
+  telegram_id: string;
+  username?: string;
+  first_name: string;
+  last_name?: string;
+  profile_photo?: string;
 }
 
 export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabProps) {
   const [selectedCurrency, setSelectedCurrency] = useState<Currency>('stars');
   const [amount, setAmount] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [targetUsername, setTargetUsername] = useState('');
+  const [targetUser, setTargetUser] = useState<TargetUser | null>(null);
+  const [isSearchingUser, setIsSearchingUser] = useState(false);
+  const [userSearchError, setUserSearchError] = useState('');
+  
   const { toast } = useToast();
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
 
-  // Calculate price
+  // Получение цен
   const { data: priceCalculation } = useQuery({
     queryKey: ['/api/purchase/calculate', selectedCurrency, amount],
-    enabled: !!amount && parseFloat(amount) > 0,
     queryFn: async () => {
+      if (!amount || parseFloat(amount) <= 0) return null;
       const response = await apiRequest('POST', '/api/purchase/calculate', {
         currency: selectedCurrency,
         amount: parseFloat(amount),
       });
       return response.json();
     },
+    enabled: !!amount && parseFloat(amount) > 0,
   });
 
-  // Purchase mutation
+  // Мутация для покупки
   const purchaseMutation = useMutation({
-    mutationFn: async (data: { currency: string; amount: number; rub_amount: number }) => {
-      const response = await apiRequest('POST', '/api/purchase', data);
-      return response.json() as Promise<PaymentResponse>;
+    mutationFn: async (purchaseData: {
+      currency: Currency;
+      amount: number;
+      rub_amount: number;
+      target_user_id?: string;
+    }) => {
+      const response = await apiRequest('POST', '/api/purchase', purchaseData);
+      return response.json();
     },
-    onSuccess: (paymentData) => {
-      // Redirect to payment page
-      window.open(paymentData.payment_url, '_blank');
-
-      // Start polling for payment status
-      pollPaymentStatus(paymentData.transaction_id);
-
-      toast({
-        title: "Переходим к оплате",
-        description: "Откройте новую вкладку для оплаты",
-      });
+    onSuccess: (data) => {
+      if (data.payment_url) {
+        setIsProcessing(true);
+        onShowLoading();
+        
+        // Открыть окно оплаты
+        window.open(data.payment_url, '_blank');
+        
+        // Начать проверку статуса
+        startStatusPolling(data.transaction.id);
+      } else {
+        // Мгновенная покупка (например, тестовый режим)
+        hapticFeedback('success');
+        toast({
+          title: "Покупка успешна!",
+          description: `${selectedCurrency === 'stars' ? 'Звезды' : 'TON'} добавлены на счет`,
+        });
+        queryClient.invalidateQueries({ queryKey: ['/api/users/me'] });
+      }
     },
     onError: (error: any) => {
-      console.error('Purchase error:', error);
+      hapticFeedback('error');
       toast({
-        title: "Ошибка создания платежа",
-        description: "Произошла ошибка при создании ссылки на оплату",
+        title: "Ошибка покупки",
+        description: error.message || "Не удалось создать заказ",
         variant: "destructive",
       });
     },
   });
 
-  // Poll payment status
-  const pollPaymentStatus = async (transactionId: string) => {
-    setIsProcessing(true);
-    onShowLoading('Ожидаем оплату...');
+  // Поиск пользователя по username
+  const searchUserMutation = useMutation({
+    mutationFn: async (username: string) => {
+      const response = await apiRequest('GET', `/api/users/search/${username}`);
+      if (!response.ok) {
+        throw new Error('Пользователь не найден');
+      }
+      return response.json();
+    },
+    onSuccess: (userData: TargetUser) => {
+      setTargetUser(userData);
+      setUserSearchError('');
+      hapticFeedback('success');
+      toast({
+        title: "Пользователь найден",
+        description: `${userData.first_name} (@${userData.username})`,
+      });
+    },
+    onError: () => {
+      setTargetUser(null);
+      setUserSearchError('Пользователь не найден');
+      hapticFeedback('error');
+    },
+  });
 
-    const maxAttempts = 30; // 5 minutes with 10 second intervals
+  // Проверка статуса платежа
+  const startStatusPolling = (transactionId: string) => {
     let attempts = 0;
+    const maxAttempts = 30; // 5 минут максимум
 
     const checkStatus = async () => {
       try {
-        const response = await apiRequest('GET', `/api/payment/status/${transactionId}`);
+        const response = await apiRequest('GET', `/api/purchase/status/${transactionId}`);
         const statusData = await response.json();
 
         if (statusData.status === 'completed') {
-          // Payment successful
-          queryClient.invalidateQueries({ queryKey: ['/api/users/me'] });
-          setAmount('');
+          // Успешная оплата
           onHideLoading();
           setIsProcessing(false);
+          setAmount('');
 
           hapticFeedback('success');
+          queryClient.invalidateQueries({ queryKey: ['/api/users/me'] });
           toast({
-            title: "Оплата успешна!",
-            description: `${selectedCurrency === 'stars' ? 'Звезды' : 'TON'} добавлены на ваш счет`,
+            title: "Покупка завершена!",
+            description: `${selectedCurrency === 'stars' ? 'Звезды' : 'TON'} добавлены на счет`,
           });
           return;
         }
 
         if (statusData.status === 'failed' || statusData.status === 'cancelled') {
-          // Payment failed
+          // Неудачная оплата
           onHideLoading();
           setIsProcessing(false);
 
@@ -117,12 +168,12 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           return;
         }
 
-        // Still pending, continue polling
+        // Продолжать опрос
         attempts++;
         if (attempts < maxAttempts) {
-          setTimeout(checkStatus, 10000); // Check every 10 seconds
+          setTimeout(checkStatus, 10000); // Проверять каждые 10 секунд
         } else {
-          // Timeout
+          // Таймаут
           onHideLoading();
           setIsProcessing(false);
           toast({
@@ -144,7 +195,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       }
     };
 
-    // Start checking after 5 seconds
+    // Начать проверку через 5 секунд
     setTimeout(checkStatus, 5000);
   };
 
@@ -158,8 +209,50 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     setAmount(quickAmount.toString());
   };
 
+  const handleSearchUser = () => {
+    if (!targetUsername.trim()) {
+      setUserSearchError('Введите username');
+      return;
+    }
+    
+    const cleanUsername = targetUsername.replace('@', '').trim();
+    setIsSearchingUser(true);
+    searchUserMutation.mutate(cleanUsername);
+    setIsSearchingUser(false);
+  };
+
+  const handleAutoFillCurrentUser = () => {
+    if (user?.username) {
+      setTargetUsername(user.username);
+      setTargetUser({
+        telegram_id: user.telegram_id,
+        username: user.username,
+        first_name: user.first_name,
+        last_name: user.last_name,
+      });
+      setUserSearchError('');
+      hapticFeedback('light');
+    }
+  };
+
+  const handleClearTargetUser = () => {
+    setTargetUser(null);
+    setTargetUsername('');
+    setUserSearchError('');
+    hapticFeedback('light');
+  };
+
   const handlePurchase = async () => {
     if (!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing) return;
+    
+    if (!targetUser) {
+      toast({
+        title: "Ошибка",
+        description: "Выберите пользователя для покупки",
+        variant: "destructive",
+      });
+      return;
+    }
 
     hapticFeedback('medium');
 
@@ -168,9 +261,10 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
         currency: selectedCurrency,
         amount: parseFloat(amount),
         rub_amount: parseFloat(priceCalculation.total_price),
+        target_user_id: targetUser.telegram_id,
       });
     } catch (error) {
-      // Error handling is done in onError callback
+      // Обработка ошибок в onError callback
     }
   };
 
@@ -185,12 +279,109 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
 
   return (
     <div className="space-y-4">
-      {/* Currency Selector */}
+      {/* Выбор получателя */}
       <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
+      >
+        <h3 className="text-lg font-semibold mb-4 flex items-center">
+          <User className="w-5 h-5 mr-2 text-[#4E7FFF]" />
+          Получатель покупки
+        </h3>
+
+        {!targetUser ? (
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="username" className="text-gray-600 dark:text-gray-400">
+                Username пользователя
+              </Label>
+              <div className="flex mt-2 space-x-2">
+                <div className="relative flex-1">
+                  <Input
+                    id="username"
+                    type="text"
+                    placeholder="@username или username"
+                    value={targetUsername}
+                    onChange={(e) => setTargetUsername(e.target.value)}
+                    className="pr-10 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20 focus:border-[#4E7FFF] focus:ring-[#4E7FFF]"
+                    disabled={isSearchingUser}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSearchUser()}
+                  />
+                  {isSearchingUser && (
+                    <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />
+                  )}
+                </div>
+                <Button
+                  onClick={handleSearchUser}
+                  disabled={isSearchingUser || !targetUsername.trim()}
+                  className="bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white"
+                >
+                  <Search className="w-4 h-4" />
+                </Button>
+              </div>
+              {userSearchError && (
+                <p className="text-red-500 text-sm mt-1 flex items-center">
+                  <UserX className="w-4 h-4 mr-1" />
+                  {userSearchError}
+                </p>
+              )}
+            </div>
+
+            <Button
+              onClick={handleAutoFillCurrentUser}
+              variant="outline"
+              className="w-full border-gray-200 dark:border-white/20 hover:bg-[#4E7FFF]/10"
+              disabled={!user?.username}
+            >
+              <UserCheck className="w-4 h-4 mr-2" />
+              Купить для себя {user?.username ? `(@${user.username})` : ''}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10">
+            <div className="flex items-center space-x-3">
+              {targetUser.profile_photo ? (
+                <img
+                  src={targetUser.profile_photo}
+                  alt="Avatar"
+                  className="w-10 h-10 rounded-full"
+                />
+              ) : (
+                <div className="w-10 h-10 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center">
+                  <span className="text-white font-bold text-sm">
+                    {targetUser.first_name?.[0] || '?'}
+                  </span>
+                </div>
+              )}
+              <div>
+                <p className="font-medium">
+                  {targetUser.first_name} {targetUser.last_name || ''}
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {targetUser.username ? `@${targetUser.username}` : 'Без username'}
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={handleClearTargetUser}
+              variant="ghost"
+              size="sm"
+              className="text-gray-500 hover:text-red-500"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
+      </motion.div>
+
+      {/* Выбор валюты */}
+      <motion.div
+        className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.1 }}
       >
         <h3 className="text-lg font-semibold mb-4 flex items-center">
           <Calculator className="w-5 h-5 mr-2 text-[#4E7FFF]" />
@@ -228,12 +419,12 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
         </div>
       </motion.div>
 
-      {/* Purchase Calculator */}
+      {/* Калькулятор покупки */}
       <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.1 }}
+        transition={{ duration: 0.3, delay: 0.2 }}
       >
         <h3 className="text-lg font-semibold mb-4">Калькулятор покупки</h3>
         <div className="space-y-4">
@@ -252,105 +443,81 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
                 disabled={isProcessing}
               />
               <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400">
-                {selectedCurrency === 'stars' ? '⭐' : '₿'}
+                {selectedCurrency === 'stars' ? '⭐' : 'TON'}
               </div>
             </div>
           </div>
 
+          {/* Быстрые кнопки */}
+          <div>
+            <Label className="text-gray-600 dark:text-gray-400 mb-2 block">
+              Быстрый выбор
+            </Label>
+            <div className="grid grid-cols-4 gap-2">
+              {quickBuyOptions.map((option) => (
+                <Button
+                  key={option}
+                  onClick={() => handleQuickBuy(option)}
+                  variant="outline"
+                  size="sm"
+                  className="border-gray-200 dark:border-white/20 hover:border-[#4E7FFF] hover:bg-[#4E7FFF]/10"
+                  disabled={isProcessing}
+                >
+                  {option}{selectedCurrency === 'stars' ? '⭐' : ' TON'}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Расчет цены */}
           {priceCalculation && (
             <motion.div
-              className="bg-gray-50 dark:bg-[#0E0E10] rounded-lg p-4"
+              className="p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.3 }}
             >
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-600 dark:text-gray-400">Стоимость:</span>
-                <span className="font-semibold">₽{priceCalculation.base_price}</span>
-              </div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-600 dark:text-gray-400">Наценка (5%):</span>
-                <span className="font-semibold text-yellow-500">₽{priceCalculation.markup_amount}</span>
-              </div>
-              <div className="border-t border-gray-200 dark:border-white/10 pt-2">
-                <div className="flex justify-between items-center">
-                  <span className="font-semibold">Итого:</span>
-                  <span className="text-xl font-bold text-[#4E7FFF]">₽{priceCalculation.total_price}</span>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">Базовая цена:</span>
+                  <span>₽{priceCalculation.base_price}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">Наценка:</span>
+                  <span>₽{priceCalculation.markup_amount}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-lg border-t border-gray-200 dark:border-white/20 pt-2">
+                  <span>Итого:</span>
+                  <span className="text-[#4E7FFF]">₽{priceCalculation.total_price}</span>
                 </div>
               </div>
             </motion.div>
           )}
 
+          {/* Кнопка покупки */}
           <Button
             onClick={handlePurchase}
-            disabled={!amount || parseFloat(amount) <= 0 || purchaseMutation.isPending || isProcessing}
-            className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white font-semibold py-4 rounded-xl glow-button disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!amount || !priceCalculation || isProcessing || !targetUser}
+            className="w-full bg-gradient-to-r from-[#4E7FFF] to-purple-500 text-white font-semibold py-3 rounded-lg glow-button disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isProcessing ? (
               <>
-                <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
-                Ожидаем оплату...
-              </>
-            ) : purchaseMutation.isPending ? (
-              <>
-                <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
-                Создание платежа...
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Обработка...
               </>
             ) : (
               <>
-                <ExternalLink className="w-4 h-4 mr-2" />
-                Перейти к оплате
+                Купить {amount} {selectedCurrency === 'stars' ? 'звезд' : 'TON'}
+                {priceCalculation && ` за ₽${priceCalculation.total_price}`}
               </>
             )}
           </Button>
-        </div>
-      </motion.div>
 
-      {/* Quick Buy Options */}
-      <motion.div
-        className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.2 }}
-      >
-        <h3 className="text-lg font-semibold mb-4">Быстрая покупка</h3>
-        <div className="grid grid-cols-2 gap-3">
-          {quickBuyOptions.map((optionAmount) => (
-            <motion.button
-              key={optionAmount}
-              onClick={() => handleQuickBuy(optionAmount)}
-              className="p-3 rounded-lg bg-gray-50 dark:bg-[#0E0E10] hover:bg-[#4E7FFF]/20 border border-gray-200 dark:border-white/10 hover:border-[#4E7FFF] transition-all disabled:opacity-50"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              disabled={isProcessing}
-            >
-              <div className="text-center">
-                <p className="font-semibold">
-                  {optionAmount} {selectedCurrency === 'stars' ? '⭐' : '₿'}
-                </p>
-                <p className="text-gray-600 dark:text-gray-400 text-sm">
-                  ₽{(optionAmount * prices[selectedCurrency] * 1.05).toLocaleString()}
-                </p>
-              </div>
-            </motion.button>
-          ))}
+          {!targetUser && (
+            <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+              Выберите получателя для активации кнопки покупки
+            </p>
+          )}
         </div>
-      </motion.div>
-
-      {/* Payment Info */}
-      <motion.div
-        className="bg-gradient-to-r from-green-500/20 to-blue-500/20 rounded-xl p-4 shadow-lg border border-white/10"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.3 }}
-      >
-        <h4 className="font-semibold mb-2 flex items-center">
-          🔒 Безопасная оплата
-        </h4>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          Оплата через проверенную платежную систему Robokassa.
-          Принимаются карты, электронные кошельки и банковские переводы.
-        </p>
       </motion.div>
     </div>
   );

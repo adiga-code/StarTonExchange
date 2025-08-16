@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 
@@ -9,12 +9,8 @@ class UserCreate(BaseModel):
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-
-class UserUpdate(BaseModel):
-    username: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    notifications_enabled: Optional[bool] = None
+    referral_code: Optional[str] = None
+    referred_by: Optional[str] = None
 
 class UserResponse(BaseModel):
     id: str
@@ -35,6 +31,12 @@ class UserResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    notifications_enabled: Optional[bool] = None
 
 # Transaction schemas
 class TransactionCreate(BaseModel):
@@ -127,7 +129,7 @@ class SettingResponse(BaseModel):
 
 # Purchase schemas
 class PurchaseCalculate(BaseModel):
-    currency: str  # Will validate in endpoint logic
+    currency: str = Field(..., regex="^(stars|ton)$")
     amount: float = Field(..., gt=0)
 
 class PurchaseCalculateResponse(BaseModel):
@@ -138,47 +140,233 @@ class PurchaseCalculateResponse(BaseModel):
     amount: float
 
 class PurchaseRequest(BaseModel):
-    currency: str  # Will validate in endpoint logic
+    currency: str = Field(..., regex="^(stars|ton)$")
     amount: float = Field(..., gt=0)
     rub_amount: float = Field(..., gt=0)
+    target_user_id: Optional[str] = None
 
 class PurchaseResponse(BaseModel):
     transaction: TransactionResponse
     status: str
+    payment_url: Optional[str] = None
 
 # Referral schemas
 class ReferralStats(BaseModel):
     total_referrals: int
     total_earnings: int
     referral_code: Optional[str]
-    referrals: list
+
+class ReferralUser(BaseModel):
+    id: str
+    username: Optional[str]
+    first_name: Optional[str]
+    created_at: datetime
+    total_spent: Decimal
 
 # Admin schemas
 class AdminStats(BaseModel):
     total_users: int
     today_sales: str
     active_referrals: int
-    recent_transactions: list
+    recent_transactions: List[dict]
 
 class AdminSettingsUpdate(BaseModel):
     stars_price: Optional[str] = None
     ton_price: Optional[str] = None
     markup_percentage: Optional[str] = None
 
-# Payment schemas
-class PaymentCreateResponse(BaseModel):
-    transaction_id: str
+# Analytics schemas
+class UserAnalytics(BaseModel):
+    total_users: int
+    new_users_today: int
+    active_users_today: int
+    total_transactions: int
+    total_revenue: Decimal
+    completed_tasks_today: int
+
+class TransactionAnalytics(BaseModel):
+    total_transactions: int
+    completed_transactions: int
+    pending_transactions: int
+    failed_transactions: int
+    total_revenue: Decimal
+    average_transaction_amount: Decimal
+
+class TaskAnalytics(BaseModel):
+    total_tasks: int
+    active_tasks: int
+    completed_tasks_today: int
+    most_popular_task: Optional[str]
+    task_completion_rate: float
+
+# Fragment API schemas
+class FragmentPaymentRequest(BaseModel):
+    amount: float
+    stars: int
+    description: str
+    webhook_url: Optional[str] = None
+
+class FragmentPaymentResponse(BaseModel):
+    payment_id: str
+    payment_url: str
+    status: str
+    expires_at: datetime
+
+class FragmentWebhookData(BaseModel):
+    payment_id: str
+    status: str
+    amount: float
+    stars: int
+    user_id: Optional[str] = None
+    transaction_hash: Optional[str] = None
+
+# Robokassa schemas
+class RobokassaPaymentRequest(BaseModel):
+    amount: Decimal
+    description: str
+    invoice_id: str
+    user_email: Optional[str] = None
+
+class RobokassaPaymentResponse(BaseModel):
     payment_url: str
     invoice_id: str
-    amount: str
-    status: str
 
-class PaymentWebhookData(BaseModel):
+class RobokassaWebhookData(BaseModel):
     OutSum: str
     InvId: str
     SignatureValue: str
+    PaymentMethod: Optional[str] = None
+    IncCurrLabel: Optional[str] = None
+
+# Bot integration schemas
+class TelegramUser(BaseModel):
+    id: int
+    first_name: str
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    language_code: Optional[str] = None
+
+class BotUserRegistration(BaseModel):
+    telegram_user: TelegramUser
+    referral_code: Optional[str] = None
+
+# Notification schemas
+class NotificationCreate(BaseModel):
+    user_id: str
+    type: str
+    title: str
+    message: str
+    data: Optional[dict] = None
+
+class NotificationResponse(BaseModel):
+    id: str
+    user_id: str
+    type: str
+    title: str
+    message: str
+    data: Optional[dict]
+    read: bool
+    created_at: datetime
     
-class PaymentStatusResponse(BaseModel):
-    transaction_id: str
-    status: str
-    paid_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+# WebApp authentication schemas
+class WebAppUser(BaseModel):
+    id: int
+    first_name: str
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    language_code: Optional[str] = None
+    is_premium: Optional[bool] = None
+
+class WebAppInitData(BaseModel):
+    query_id: Optional[str] = None
+    user: Optional[WebAppUser] = None
+    receiver: Optional[WebAppUser] = None
+    start_param: Optional[str] = None
+    auth_date: int
+    hash: str
+
+# Task completion schemas
+class TaskCompletionRequest(BaseModel):
+    action_data: Optional[dict] = None
+
+class TaskCompletionResponse(BaseModel):
+    success: bool
+    reward: int
+    message: str
+    new_balance: int
+
+# Batch operation schemas
+class BatchUserTaskCreate(BaseModel):
+    task_id: str
+    user_ids: List[str]
+
+class BatchTaskUpdate(BaseModel):
+    task_ids: List[str]
+    updates: dict
+
+# Statistics schemas
+class DailyStats(BaseModel):
+    date: str
+    new_users: int
+    active_users: int
+    completed_transactions: int
+    total_revenue: Decimal
+    completed_tasks: int
+
+class WeeklyStats(BaseModel):
+    week_start: str
+    total_users: int
+    new_users: int
+    total_revenue: Decimal
+    popular_tasks: List[dict]
+
+class MonthlyStats(BaseModel):
+    month: str
+    total_users: int
+    new_users: int
+    total_revenue: Decimal
+    top_referrers: List[dict]
+
+# Search schemas
+class UserSearchResponse(BaseModel):
+    telegram_id: str
+    username: Optional[str]
+    first_name: str
+    last_name: Optional[str]
+    profile_photo: Optional[str]
+
+class UserSearchQuery(BaseModel):
+    query: str
+    limit: Optional[int] = 10
+
+# Configuration schemas
+class AppConfig(BaseModel):
+    stars_price: float
+    ton_price: float
+    markup_percentage: float
+    min_purchase_amount: float
+    max_purchase_amount: float
+    referral_bonus_percentage: float
+    daily_login_reward: int
+    bot_token: str
+    webapp_url: str
+    
+# Error schemas
+class ErrorResponse(BaseModel):
+    error: str
+    message: str
+    details: Optional[dict] = None
+
+class ValidationErrorResponse(BaseModel):
+    error: str
+    message: str
+    field_errors: List[dict]
+
+# Success schemas
+class SuccessResponse(BaseModel):
+    success: bool
+    message: str
+    data: Optional[dict] = None

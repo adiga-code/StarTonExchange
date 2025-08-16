@@ -789,53 +789,35 @@ async def get_storage(db: AsyncSession = Depends(get_db)):
 # Dependency to get current user
 async def get_authenticated_user(
     storage: Storage = Depends(get_storage),
-    x_telegram_id: Optional[str] = Header(None),
     x_telegram_init_data: Optional[str] = Header(None)
-) -> Optional[User]:
-    return await get_current_user(storage, x_telegram_id, x_telegram_init_data)
+) -> User:
+    user = await get_current_user(storage, None, x_telegram_init_data)
+    if not user:
+        raise HTTPException(status_code=403, detail="Invalid or missing Telegram authentication data")
+    return user
 
+# User routes
 @app.post("/api/users", response_model=UserResponse)
 async def create_user(
     user_data: UserCreate,
     storage: Storage = Depends(get_storage)
 ):
     try:
-        logger.info(f"Received user creation request: {user_data.dict()}")
-        
-        # Проверяем, есть ли у нас telegram_id
-        # if not user_data.telegram_id:
-        #     logger.error("Missing telegram_id in user creation request")
-        #     if settings.debug:
-        #         # В режиме отладки используем тестовый ID
-        #         user_data.telegram_id = "123456789"
-        #         logger.info(f"Debug mode: Using fallback telegram_id={user_data.telegram_id}")
-        #     else:
-        #         # В production строго требуем telegram_id
-        #         raise HTTPException(status_code=400, detail="telegram_id is required")
-        
-        # Проверяем, существует ли пользователь
         existing_user = await storage.get_user_by_telegram_id(user_data.telegram_id)
         if existing_user:
-            logger.info(f"User already exists: {existing_user.telegram_id}")
             return existing_user
         
-        # Создаем нового пользователя
         user = await storage.create_user(user_data)
-        logger.info(f"Created user: {user.id} telegram_id: {user.telegram_id}")
+        logger.info(f"Created user: {user.id} telegramId: {user.telegram_id}")
         return user
-        
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error creating user: {e}")
-        raise HTTPException(status_code=400, detail=f"Invalid user data: {str(e)}")
+        raise HTTPException(status_code=400, detail="Invalid user data")
 
 @app.get("/api/users/me", response_model=UserResponse)
 async def get_current_user_info(
     current_user: User = Depends(get_authenticated_user)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
     return current_user
 
 @app.put("/api/users/me", response_model=UserResponse)
@@ -844,9 +826,6 @@ async def update_current_user(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     update_dict = {k: v for k, v in updates.dict().items() if v is not None}
     updated_user = await storage.update_user(current_user.id, update_dict)
     return updated_user
@@ -894,9 +873,6 @@ async def make_purchase(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     try:
         # Validate currency
         if purchase_data.currency not in ['stars', 'ton']:
@@ -955,18 +931,14 @@ async def make_purchase(
 # Tasks routes
 @app.get("/api/tasks", response_model=List[TaskResponse])
 async def get_tasks(
-    current_user: Optional[User] = Depends(get_authenticated_user),
+    current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
     try:
         tasks = await storage.get_active_tasks()
-        
-        if not current_user:
-            return [TaskResponse(**task.__dict__, completed=False) for task in tasks]
-        
         user_tasks = await storage.get_user_tasks(current_user.id)
         user_task_map = {ut.task_id: ut for ut in user_tasks}
-        
+
         tasks_with_completion = []
         for task in tasks:
             user_task = user_task_map.get(task.id)
@@ -974,7 +946,7 @@ async def get_tasks(
             task_dict['completed'] = user_task.completed if user_task else False
             task_dict['completed_at'] = user_task.completed_at if user_task else None
             tasks_with_completion.append(TaskResponse(**task_dict))
-        
+
         return tasks_with_completion
     except Exception as e:
         logger.error(f"Error getting tasks: {e}")
@@ -986,9 +958,6 @@ async def complete_task(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     try:
         task = await storage.get_task(task_id)
         if not task:
@@ -1042,9 +1011,6 @@ async def get_referral_stats(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     try:
         all_users = await storage.get_all_users()
         referrals = [u for u in all_users if u.referred_by == current_user.id]
@@ -1150,9 +1116,6 @@ async def get_payment_status(
     storage: Storage = Depends(get_storage)
 ):
     """Get payment status for transaction"""
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     try:
         transaction = await storage.get_transaction(transaction_id)
         
@@ -1283,7 +1246,6 @@ if __name__ == "__main__":
         port=port,
         reload=True if os.getenv("DEVELOPMENT") else False
     )
-
 
 ================================================================================
 FILE: backend\models.py
@@ -1571,60 +1533,43 @@ if __name__ == "__main__":
 FILE: backend\schemas.py
 ================================================================================
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 from decimal import Decimal
-import json
 
+# User schemas
 class UserCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    telegram_id: Optional[str] = Field(None, alias="telegramId")
+    telegram_id: str
     username: Optional[str] = None
-    first_name: Optional[str] = Field(None, alias="firstName")
-    last_name: Optional[str] = Field(None, alias="lastName")
-    init_data: Optional[str] = Field(None, alias="init_data")
-
-    def validate_init_data(self, bot_token: str):
-        from backend.telegram_auth import validate_telegram_data
-        if self.init_data:
-            user_data = validate_telegram_data(self.init_data, bot_token)
-            if not user_data:
-                raise ValueError("Invalid Telegram init_data")
-            self.telegram_id = str(user_data.get("id"))
-            self.username = user_data.get("username")
-            self.first_name = user_data.get("first_name")
-            self.last_name = user_data.get("last_name")
-        elif not self.telegram_id:
-            raise ValueError("telegram_id or init_data must be provided")
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 class UserUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
     username: Optional[str] = None
-    first_name: Optional[str] = Field(None, alias="firstName")
-    last_name: Optional[str] = Field(None, alias="lastName")
-    notifications_enabled: Optional[bool] = Field(None, alias="notificationsEnabled")
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    notifications_enabled: Optional[bool] = None
 
 class UserResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
-    telegram_id: str = Field(alias="telegramId")
+    telegram_id: str
     username: Optional[str]
-    first_name: Optional[str] = Field(alias="firstName")
-    last_name: Optional[str] = Field(alias="lastName")
-    stars_balance: int = Field(alias="starsBalance")
-    ton_balance: Decimal = Field(alias="tonBalance")
-    referral_code: Optional[str] = Field(alias="referralCode")
-    referred_by: Optional[str] = Field(alias="referredBy")
-    total_stars_earned: int = Field(alias="totalStarsEarned")
-    total_referral_earnings: int = Field(alias="totalReferralEarnings")
-    tasks_completed: int = Field(alias="tasksCompleted")
-    daily_earnings: int = Field(alias="dailyEarnings")
-    notifications_enabled: bool = Field(alias="notificationsEnabled")
-    created_at: datetime = Field(alias="createdAt")
+    first_name: Optional[str]
+    last_name: Optional[str]
+    stars_balance: int
+    ton_balance: Decimal
+    referral_code: Optional[str]
+    referred_by: Optional[str]
+    total_stars_earned: int
+    total_referral_earnings: int
+    tasks_completed: int
+    daily_earnings: int
+    notifications_enabled: bool
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 # Transaction schemas
 class TransactionCreate(BaseModel):
@@ -1640,21 +1585,22 @@ class TransactionCreate(BaseModel):
     invoice_id: Optional[str] = None
 
 class TransactionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
-    user_id: str = Field(alias="userId")
+    user_id: str
     type: str
     currency: str
     amount: Decimal
-    rub_amount: Optional[Decimal] = Field(None, alias="rubAmount")
+    rub_amount: Optional[Decimal]
     status: str
     description: Optional[str]
-    payment_system: Optional[str] = Field(None, alias="paymentSystem")
-    payment_url: Optional[str] = Field(None, alias="paymentUrl")
-    invoice_id: Optional[str] = Field(None, alias="invoiceId")
-    created_at: datetime = Field(alias="createdAt")
-    paid_at: Optional[datetime] = Field(None, alias="paidAt")
+    payment_system: Optional[str]
+    payment_url: Optional[str]
+    invoice_id: Optional[str]
+    created_at: datetime
+    paid_at: Optional[datetime]
+    
+    class Config:
+        from_attributes = True
 
 # Task schemas
 class TaskCreate(BaseModel):
@@ -1666,18 +1612,19 @@ class TaskCreate(BaseModel):
     is_active: Optional[bool] = True
 
 class TaskResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
     title: str
     description: str
     reward: int
     type: str
     action: Optional[str]
-    is_active: bool = Field(alias="isActive")
-    created_at: datetime = Field(alias="createdAt")
+    is_active: bool
+    created_at: datetime
     completed: Optional[bool] = False
-    completed_at: Optional[datetime] = Field(None, alias="completedAt")
+    completed_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
 
 # UserTask schemas
 class UserTaskCreate(BaseModel):
@@ -1686,14 +1633,15 @@ class UserTaskCreate(BaseModel):
     completed: Optional[bool] = False
 
 class UserTaskResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
-    user_id: str = Field(alias="userId")
-    task_id: str = Field(alias="taskId")
+    user_id: str
+    task_id: str
     completed: bool
-    completed_at: Optional[datetime] = Field(None, alias="completedAt")
-    created_at: datetime = Field(alias="createdAt")
+    completed_at: Optional[datetime]
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 # Setting schemas
 class SettingCreate(BaseModel):
@@ -1704,12 +1652,13 @@ class SettingUpdate(BaseModel):
     value: str
 
 class SettingResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
     id: str
     key: str
     value: str
-    updated_at: datetime = Field(alias="updatedAt")
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 # Purchase schemas
 class PurchaseCalculate(BaseModel):
@@ -1717,16 +1666,16 @@ class PurchaseCalculate(BaseModel):
     amount: float = Field(..., gt=0)
 
 class PurchaseCalculateResponse(BaseModel):
-    base_price: str = Field(alias="basePrice")
-    markup_amount: str = Field(alias="markupAmount")
-    total_price: str = Field(alias="totalPrice")
+    base_price: str
+    markup_amount: str
+    total_price: str
     currency: str
     amount: float
 
 class PurchaseRequest(BaseModel):
     currency: str  # Will validate in endpoint logic
     amount: float = Field(..., gt=0)
-    rub_amount: float = Field(..., gt=0, alias="rubAmount")
+    rub_amount: float = Field(..., gt=0)
 
 class PurchaseResponse(BaseModel):
     transaction: TransactionResponse
@@ -1734,36 +1683,28 @@ class PurchaseResponse(BaseModel):
 
 # Referral schemas
 class ReferralStats(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    total_referrals: int = Field(alias="totalReferrals")
-    total_earnings: int = Field(alias="totalEarnings")
-    referral_code: Optional[str] = Field(alias="referralCode")
+    total_referrals: int
+    total_earnings: int
+    referral_code: Optional[str]
     referrals: list
 
 # Admin schemas
 class AdminStats(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    total_users: int = Field(alias="totalUsers")
-    today_sales: str = Field(alias="todaySales")
-    active_referrals: int = Field(alias="activeReferrals")
-    recent_transactions: list = Field(alias="recentTransactions")
+    total_users: int
+    today_sales: str
+    active_referrals: int
+    recent_transactions: list
 
 class AdminSettingsUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    stars_price: Optional[str] = Field(None, alias="starsPrice")
-    ton_price: Optional[str] = Field(None, alias="tonPrice")
-    markup_percentage: Optional[str] = Field(None, alias="markupPercentage")
+    stars_price: Optional[str] = None
+    ton_price: Optional[str] = None
+    markup_percentage: Optional[str] = None
 
 # Payment schemas
 class PaymentCreateResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    transaction_id: str = Field(alias="transactionId")
-    payment_url: str = Field(alias="paymentUrl")
-    invoice_id: str = Field(alias="invoiceId")
+    transaction_id: str
+    payment_url: str
+    invoice_id: str
     amount: str
     status: str
 
@@ -1773,11 +1714,9 @@ class PaymentWebhookData(BaseModel):
     SignatureValue: str
     
 class PaymentStatusResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    transaction_id: str = Field(alias="transactionId")
+    transaction_id: str
     status: str
-    paid_at: Optional[datetime] = Field(None, alias="paidAt")
+    paid_at: Optional[datetime] = None
 
 ================================================================================
 FILE: backend\storage.py
@@ -1983,9 +1922,6 @@ from urllib.parse import unquote
 from typing import Dict, Optional
 import os
 from datetime import datetime, timedelta
-import logging
-
-logger = logging.getLogger(__name__)
 
 def validate_telegram_data(init_data: str, bot_token: str) -> Optional[Dict]:
     """
@@ -1993,9 +1929,8 @@ def validate_telegram_data(init_data: str, bot_token: str) -> Optional[Dict]:
     Returns user data if valid, None if invalid
     """
     try:
-        logger.info(f"Validating init_data: {init_data[:50]}...")
-        
         # Parse the init_data
+        data_check_string = ""
         data = {}
         
         # Parse query string
@@ -2013,15 +1948,9 @@ def validate_telegram_data(init_data: str, bot_token: str) -> Optional[Dict]:
                 else:
                     data[key] = value
         
-        if not hash_value:
-            logger.error("No hash found in init_data")
-            return None
-        
         # Create data check string
         sorted_keys = sorted(data.keys())
         data_check_string = '\n'.join([f"{key}={data[key]}" for key in sorted_keys])
-        
-        logger.info(f"Data check string: {data_check_string}")
         
         # Generate secret key
         secret_key = hmac.new(
@@ -2037,83 +1966,44 @@ def validate_telegram_data(init_data: str, bot_token: str) -> Optional[Dict]:
             hashlib.sha256
         ).hexdigest()
         
-        logger.info(f"Calculated hash: {calculated_hash}")
-        logger.info(f"Received hash: {hash_value}")
-        
         # Compare hashes
         if not hmac.compare_digest(calculated_hash, hash_value):
-            logger.error("Hash validation failed")
             return None
         
         # Check auth_date (data should not be older than 24 hours)
         if 'auth_date' in data:
             auth_date = datetime.fromtimestamp(int(data['auth_date']))
             if datetime.now() - auth_date > timedelta(hours=24):
-                logger.error("Auth date is too old")
                 return None
         
         # Parse user data
         if 'user' in data:
             user_data = json.loads(data['user'])
-            logger.info(f"User data extracted: {user_data}")
             return user_data
         
-        logger.error("No user data found in init_data")
         return None
         
     except Exception as e:
-        logger.error(f"Error validating Telegram data: {e}")
+        print(f"Error validating Telegram data: {e}")
         return None
 
 def get_user_from_header(telegram_id: str = None, init_data: str = None) -> Optional[Dict]:
     """
-    Get user data from headers - for development and production
+    Get user data from headers - only with valid initData
     """
     bot_token = os.getenv('BOT_TOKEN')
-    
-    logger.info(f"Getting user from headers: telegram_id={telegram_id}, has_init_data={bool(init_data)}, has_bot_token={bool(bot_token)}")
-    
-    # Для режима разработки и отладки
-    # if settings.debug:
-    #     # Если есть telegram_id, используем его напрямую
-    #     if telegram_id:
-    #         logger.info(f"Debug mode: Using telegram_id={telegram_id} without validation")
-    #         return {
-    #             'id': int(telegram_id),
-    #             'first_name': 'Dev',
-    #             'last_name': 'User',
-    #             'username': f'dev_{telegram_id}'
-    #         }
-        
-    #     # Если нет ID, используем тестового пользователя
-    #     logger.info("Debug mode: Using test user")
-    #     return {
-    #         'id': 123456789,
-    #         'first_name': 'Test',
-    #         'last_name': 'User',
-    #         'username': 'testuser'
-    #     }
-    
-    # Для продакшена - строго проверяем initData
-    if init_data and bot_token:
-        user_data = validate_telegram_data(init_data, bot_token)
-        if user_data:
-            logger.info(f"Production: Validated user from init_data: {user_data.get('id')}")
-            return user_data
-    
-    # Если нет initData или не прошла валидация - проверяем наличие telegram_id
-    if telegram_id:
-        logger.warning(f"Production: Using unvalidated telegram_id={telegram_id} (no valid init_data)")
-        return {
-            'id': int(telegram_id),
-            'first_name': 'Unknown',
-            'last_name': 'User',
-            'username': f'user_{telegram_id}'
-        }
-    
-    # Если нет ни initData, ни telegram_id - не авторизуем
-    logger.error("Production: No valid user data found")
-    return None
+
+    # Требуем наличие BOT_TOKEN и init_data
+    if not bot_token:
+        print("BOT_TOKEN not configured")
+        return None
+
+    if not init_data:
+        print("init_data not provided")
+        return None
+
+    # Валидируем init_data
+    return validate_telegram_data(init_data, bot_token)
 
 async def get_current_user(storage, telegram_id: str = None, init_data: str = None):
     """
@@ -2121,11 +2011,9 @@ async def get_current_user(storage, telegram_id: str = None, init_data: str = No
     """
     user_data = get_user_from_header(telegram_id, init_data)
     if not user_data:
-        logger.error("No valid user data found")
         return None
     
     user = await storage.get_user_by_telegram_id(str(user_data['id']))
-    logger.info(f"Found user in database: {bool(user)}")
     return user
 
 ================================================================================
@@ -2179,16 +2067,20 @@ FILE: frontend\index.html
 
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-    <!-- This is a replit script which adds a banner on the top of the page when opened in development mode outside the replit environment -->
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+</head>
+
+<body>
+  <div id="root"></div>
+  <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
+  <script type="module" src="/src/main.tsx"></script>
+  <!-- This is a replit script which adds a banner on the top of the page when opened in development mode outside the replit environment -->
+  <script type="text/javascript" src="https://replit.com/public/js/replit-dev-banner.js"></script>
+</body>
+
 </html>
 
 ================================================================================
@@ -2314,7 +2206,6 @@ FILE: frontend\package.json
     "bufferutil": "^4.0.8"
   }
 }
-
 
 ================================================================================
 FILE: frontend\parse.py
@@ -2539,8 +2430,8 @@ export default defineConfig({
     // Убираем replit-специфичные плагины для продакшена
     ...(process.env.NODE_ENV === "development" && process.env.REPL_ID
       ? [
-          // Эти плагины только для replit разработки
-        ]
+        // Эти плагины только для replit разработки
+      ]
       : []),
   ],
   resolve: {
@@ -2553,7 +2444,42 @@ export default defineConfig({
     outDir: "dist", // Исправлено - относительный путь
     emptyOutDir: true,
     sourcemap: false,
-    minify: "terser",
+
+    // ИСПРАВЛЕНИЕ: Заменяем terser на esbuild - быстрее и стабильнее
+    minify: "esbuild",
+
+    // Добавляем оптимизации для предотвращения зависания
+    target: 'es2015',
+    chunkSizeWarningLimit: 1000,
+
+    // rollupOptions: {
+    //   // Ограничиваем параллельные операции для стабильности
+    //   maxParallelFileOps: 1,
+
+    //   output: {
+    //     // Разделяем большие библиотеки в отдельные chunks
+    //     manualChunks: (id) => {
+    //       if (id.includes('node_modules')) {
+    //         // Группируем vendor библиотеки
+    //         if (id.includes('react') || id.includes('react-dom')) {
+    //           return 'react-vendor';
+    //         }
+    //         if (id.includes('@radix-ui')) {
+    //           return 'ui-vendor';
+    //         }
+    //         return 'vendor';
+    //       }
+    //     },
+
+    //     // Оптимизируем имена файлов
+    //     chunkFileNames: (chunkInfo) => {
+    //       const facadeModuleId = chunkInfo.facadeModuleId
+    //         ? chunkInfo.facadeModuleId.split('/').pop()
+    //         : 'chunk';
+    //       return `${facadeModuleId}-[hash].js`;
+    //     }
+    //   }
+    // }
   },
   server: {
     host: true,
@@ -2565,6 +2491,13 @@ export default defineConfig({
       },
     },
   },
+
+  // Оптимизируем предварительную сборку зависимостей
+  optimizeDeps: {
+    include: ['react', 'react-dom'],
+    // Исключаем проблемные пакеты
+    exclude: ['@esbuild-kit/esm-loader', '@esbuild-kit/core-utils']
+  }
 });
 
 ================================================================================
@@ -2923,170 +2856,8 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 
-// Типизация для Telegram WebApp
-interface TelegramWebApp {
-  initData: string;
-  initDataUnsafe: Record<string, any>;
-  version: string;
-  platform: string;
-  colorScheme: 'light' | 'dark';
-  themeParams: Record<string, string>;
-  isExpanded: boolean;
-  viewportHeight: number;
-  viewportStableHeight: number;
-  ready(): void;
-  expand(): void;
-  close(): void;
-}
+createRoot(document.getElementById("root")!).render(<App />);
 
-declare global {
-  interface Window {
-    Telegram?: {
-      WebApp: TelegramWebApp;
-    };
-  }
-}
-
-// Проверка, находимся ли мы в настоящем Telegram WebApp
-const isTelegramWebApp = (): boolean => {
-  try {
-    const tg = window.Telegram?.WebApp;
-    
-    if (!tg) return false;
-    
-    // Проверяем наличие ключевых методов и свойств
-    const hasRequiredMethods = typeof tg.ready === 'function' &&
-                              typeof tg.expand === 'function' &&
-                              typeof tg.close === 'function';
-    
-    const hasRequiredProps = typeof tg.version === 'string' &&
-                            typeof tg.platform === 'string' &&
-                            typeof tg.initData === 'string';
-    
-    // Дополнительная проверка на подлинность через initData
-    const hasValidInitData = tg.initData && tg.initData.length > 0;
-    
-    return hasRequiredMethods && hasRequiredProps && hasValidInitData;
-  } catch (error) {
-    console.warn('Ошибка при проверке Telegram WebApp:', error);
-    return false;
-  }
-};
-
-// Показать сообщение об ошибке доступа
-const showAccessDeniedMessage = (): void => {
-  document.body.innerHTML = `
-    <div style="
-      display: flex; 
-      flex-direction: column; 
-      align-items: center; 
-      justify-content: center; 
-      height: 100vh; 
-      text-align: center; 
-      padding: 20px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-    ">
-      <div style="
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 20px;
-        padding: 40px;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        max-width: 400px;
-      ">
-        <h1 style="margin-bottom: 20px; font-size: 24px; font-weight: 600;">
-          🤖 Только для Telegram
-        </h1>
-        <p style="margin-bottom: 30px; font-size: 16px; line-height: 1.5; opacity: 0.9;">
-          Это приложение работает только внутри Telegram WebApp
-        </p>
-        <a 
-          href="https://t.me/your_bot_username" 
-          style="
-            display: inline-block;
-            background: #4E7FFF;
-            color: white;
-            text-decoration: none;
-            padding: 12px 24px;
-            border-radius: 12px;
-            font-weight: 500;
-            transition: background 0.3s;
-          "
-          onmouseover="this.style.background='#3d6ce8'"
-          onmouseout="this.style.background='#4E7FFF'"
-        >
-          Открыть в Telegram
-        </a>
-      </div>
-    </div>
-  `;
-};
-
-// Инициализация приложения
-const initializeApp = (): void => {
-  try {
-    const rootElement = document.getElementById("root");
-    
-    if (!rootElement) {
-      throw new Error("Элемент с id 'root' не найден");
-    }
-
-    // В development режиме разрешаем доступ без Telegram
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('🚧 Development режим: приложение запущено без проверки Telegram WebApp');
-      createRoot(rootElement).render(<App />);
-      return;
-    }
-
-    // В production проверяем Telegram WebApp
-    if (!isTelegramWebApp()) {
-      showAccessDeniedMessage();
-      return;
-    }
-
-    // Инициализируем Telegram WebApp
-    window.Telegram!.WebApp.ready();
-    window.Telegram!.WebApp.expand();
-    
-    // Применяем тему Telegram
-    if (window.Telegram!.WebApp.colorScheme === 'dark') {
-      document.documentElement.classList.add('dark');
-    }
-
-    // Запускаем React приложение
-    createRoot(rootElement).render(<App />);
-    
-  } catch (error) {
-    console.error('Критическая ошибка при инициализации приложения:', error);
-    
-    document.body.innerHTML = `
-      <div style="
-        display: flex; 
-        flex-direction: column; 
-        align-items: center; 
-        justify-content: center; 
-        height: 100vh; 
-        text-align: center; 
-        padding: 20px;
-        font-family: monospace;
-        background: #1a1a1a;
-        color: #ff6b6b;
-      ">
-        <h1>❌ Ошибка инициализации</h1>
-        <p>Произошла критическая ошибка при запуске приложения</p>
-        <details style="margin-top: 20px; color: #888;">
-          <summary>Подробности</summary>
-          <pre style="margin-top: 10px; font-size: 12px;">${error.message}</pre>
-        </details>
-      </div>
-    `;
-  }
-};
-
-// Запуск приложения
-initializeApp();
 
 ================================================================================
 FILE: frontend\src\components\admin-panel.tsx
@@ -3348,19 +3119,19 @@ FILE: frontend\src\components\balance-card.tsx
 
 import { motion } from "framer-motion";
 import { Star } from "lucide-react";
-import type { User } from "@shared/schema";
+import type { SnakeCaseUser, User } from "@shared/schema";
 
 interface BalanceCardProps {
-  user?: User;
+  user?: SnakeCaseUser;
 }
 
 export default function BalanceCard({ user }: BalanceCardProps) {
-  const starsBalance = user?.starsBalance || 0;
+  const starsBalance = user?.stars_balance || 0;
   // TON balance is not stored locally, only shown for reference
   const totalRubValue = starsBalance * 2.30;
 
   return (
-    <motion.div 
+    <motion.div
       className="p-4 animate-fade-in"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
@@ -3370,13 +3141,13 @@ export default function BalanceCard({ user }: BalanceCardProps) {
         <div className="text-center">
           <p className="text-gray-600 dark:text-gray-400 text-sm mb-2">Ваш баланс</p>
           <div className="flex items-center justify-center">
-            <motion.div 
+            <motion.div
               className="text-center"
               whileHover={{ scale: 1.05 }}
             >
               <div className="flex items-center justify-center space-x-2 mb-1">
                 <Star className="w-6 h-6 text-yellow-500" />
-                <motion.span 
+                <motion.span
                   className="text-3xl font-bold"
                   key={starsBalance}
                   initial={{ scale: 1 }}
@@ -3389,14 +3160,14 @@ export default function BalanceCard({ user }: BalanceCardProps) {
               <p className="text-gray-600 dark:text-gray-400 text-sm">Telegram Stars</p>
             </motion.div>
           </div>
-          <motion.div 
+          <motion.div
             className="mt-4 pt-4 border-t border-white/10"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
             <p className="text-gray-600 dark:text-gray-400 text-xs">Стоимость звезд</p>
-            <motion.p 
+            <motion.p
               className="text-lg font-semibold"
               key={totalRubValue}
               initial={{ scale: 1 }}
@@ -3427,10 +3198,10 @@ import { Star, Bitcoin, ShoppingCart, Calculator, ExternalLink } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { User } from "@shared/schema";
+import type { SnakeCaseUser, User } from "@shared/schema";
 
 interface BuyTabProps {
-  user?: User;
+  user?: SnakeCaseUser;
   onShowLoading: (message: string) => void;
   onHideLoading: () => void;
 }
@@ -3475,10 +3246,10 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     onSuccess: (paymentData) => {
       // Redirect to payment page
       window.open(paymentData.payment_url, '_blank');
-      
+
       // Start polling for payment status
       pollPaymentStatus(paymentData.transaction_id);
-      
+
       toast({
         title: "Переходим к оплате",
         description: "Откройте новую вкладку для оплаты",
@@ -3498,22 +3269,22 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
   const pollPaymentStatus = async (transactionId: string) => {
     setIsProcessing(true);
     onShowLoading('Ожидаем оплату...');
-    
+
     const maxAttempts = 30; // 5 minutes with 10 second intervals
     let attempts = 0;
-    
+
     const checkStatus = async () => {
       try {
         const response = await apiRequest('GET', `/api/payment/status/${transactionId}`);
         const statusData = await response.json();
-        
+
         if (statusData.status === 'completed') {
           // Payment successful
           queryClient.invalidateQueries({ queryKey: ['/api/users/me'] });
           setAmount('');
           onHideLoading();
           setIsProcessing(false);
-          
+
           hapticFeedback('success');
           toast({
             title: "Оплата успешна!",
@@ -3521,12 +3292,12 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           });
           return;
         }
-        
+
         if (statusData.status === 'failed' || statusData.status === 'cancelled') {
           // Payment failed
           onHideLoading();
           setIsProcessing(false);
-          
+
           hapticFeedback('error');
           toast({
             title: "Оплата отменена",
@@ -3535,7 +3306,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           });
           return;
         }
-        
+
         // Still pending, continue polling
         attempts++;
         if (attempts < maxAttempts) {
@@ -3550,7 +3321,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
             variant: "destructive",
           });
         }
-        
+
       } catch (error) {
         console.error('Error checking payment status:', error);
         attempts++;
@@ -3562,7 +3333,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
         }
       }
     };
-    
+
     // Start checking after 5 seconds
     setTimeout(checkStatus, 5000);
   };
@@ -3581,7 +3352,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     if (!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing) return;
 
     hapticFeedback('medium');
-    
+
     try {
       await purchaseMutation.mutateAsync({
         currency: selectedCurrency,
@@ -3598,14 +3369,14 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     ton: 420.50,
   };
 
-  const quickBuyOptions = selectedCurrency === 'stars' 
+  const quickBuyOptions = selectedCurrency === 'stars'
     ? [100, 500, 1000, 2500]
     : [0.1, 0.5, 1, 2.5];
 
   return (
     <div className="space-y-4">
       {/* Currency Selector */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -3618,11 +3389,10 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
         <div className="grid grid-cols-2 gap-3">
           <motion.button
             onClick={() => handleCurrencySelect('stars')}
-            className={`p-4 rounded-xl border-2 transition-all ${
-              selectedCurrency === 'stars'
+            className={`p-4 rounded-xl border-2 transition-all ${selectedCurrency === 'stars'
                 ? 'border-[#4E7FFF] bg-[#4E7FFF]/10'
                 : 'border-gray-200 dark:border-white/10 hover:border-[#4E7FFF]/50'
-            }`}
+              }`}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             disabled={isProcessing}
@@ -3633,11 +3403,10 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           </motion.button>
           <motion.button
             onClick={() => handleCurrencySelect('ton')}
-            className={`p-4 rounded-xl border-2 transition-all ${
-              selectedCurrency === 'ton'
+            className={`p-4 rounded-xl border-2 transition-all ${selectedCurrency === 'ton'
                 ? 'border-[#4E7FFF] bg-[#4E7FFF]/10'
                 : 'border-gray-200 dark:border-white/10 hover:border-[#4E7FFF]/50'
-            }`}
+              }`}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             disabled={isProcessing}
@@ -3650,7 +3419,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       </motion.div>
 
       {/* Purchase Calculator */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -3677,9 +3446,9 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
               </div>
             </div>
           </div>
-          
+
           {priceCalculation && (
-            <motion.div 
+            <motion.div
               className="bg-gray-50 dark:bg-[#0E0E10] rounded-lg p-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3728,7 +3497,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       </motion.div>
 
       {/* Quick Buy Options */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -3759,7 +3528,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       </motion.div>
 
       {/* Payment Info */}
-      <motion.div 
+      <motion.div
         className="bg-gradient-to-r from-green-500/20 to-blue-500/20 rounded-xl p-4 shadow-lg border border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -3769,7 +3538,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
           🔒 Безопасная оплата
         </h4>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Оплата через проверенную платежную систему Robokassa. 
+          Оплата через проверенную платежную систему Robokassa.
           Принимаются карты, электронные кошельки и банковские переводы.
         </p>
       </motion.div>
@@ -3846,10 +3615,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import type { User } from "@shared/schema";
+import type { SnakeCaseUser, User } from "@shared/schema";
+
 
 interface ProfileTabProps {
-  user?: User;
+  user?: SnakeCaseUser;
 }
 
 export default function ProfileTab({ user }: ProfileTabProps) {
@@ -3866,14 +3636,14 @@ export default function ProfileTab({ user }: ProfileTabProps) {
 
   const getUserInitials = () => {
     if (!user) return 'JD';
-    const first = user.firstName?.[0] || '';
-    const last = user.lastName?.[0] || '';
+    const first = user.first_name?.[0] || '';
+    const last = user.last_name?.[0] || '';
     return (first + last).toUpperCase() || user.username?.[0]?.toUpperCase() || 'U';
   };
 
   const copyReferralLink = async () => {
-    const referralLink = `https://t.me/starsexchange_bot?start=ref${user?.referralCode || '12345678'}`;
-    
+    const referralLink = `https://t.me/starsexchange_bot?start=ref${user?.referral_code || '12345678'}`;
+
     try {
       await navigator.clipboard.writeText(referralLink);
       hapticFeedback('success');
@@ -3894,18 +3664,18 @@ export default function ProfileTab({ user }: ProfileTabProps) {
     hapticFeedback('medium');
     shareApp('Попробуй этот крутой обменник Stars и TON! 🚀');
   };
-
+  console.log("user", user)
   return (
     <div className="space-y-4">
       {/* User Info */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
         <div className="flex items-center space-x-4 mb-4">
-          <motion.div 
+          <motion.div
             className="w-16 h-16 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center"
             whileHover={{ scale: 1.05 }}
           >
@@ -3913,28 +3683,28 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           </motion.div>
           <div>
             <h3 className="text-xl font-bold">
-              {user?.firstName} {user?.lastName}
+              {user?.first_name} {user?.last_name}
             </h3>
             <p className="text-gray-600 dark:text-gray-400">
               {user?.username ? `@${user.username}` : 'Пользователь'}
             </p>
             <p className="text-gray-600 dark:text-gray-400 text-sm">
-              ID: {user?.id || '12345678'}
+              ID: {user?.telegram_id || '12345678'}
             </p>
           </div>
         </div>
-        
+
         <div className="grid grid-cols-2 gap-4">
-          <motion.div 
+          <motion.div
             className="bg-gray-50 dark:bg-[#0E0E10] rounded-lg p-3 text-center"
             whileHover={{ scale: 1.02 }}
           >
             <p className="text-2xl font-bold text-yellow-500 flex items-center justify-center">
-              {user?.totalStarsEarned || 0} <Star className="w-5 h-5 ml-1" />
+              {user?.total_stars_earned || 0} <Star className="w-5 h-5 ml-1" />
             </p>
             <p className="text-gray-600 dark:text-gray-400 text-sm">Всего звезд</p>
           </motion.div>
-          <motion.div 
+          <motion.div
             className="bg-gray-50 dark:bg-[#0E0E10] rounded-lg p-3 text-center"
             whileHover={{ scale: 1.02 }}
           >
@@ -3947,7 +3717,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
       </motion.div>
 
       {/* Referral System */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -3957,7 +3727,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           <Users className="w-5 h-5 text-[#4E7FFF] mr-2" />
           Реферальная программа
         </h3>
-        
+
         <div className="bg-gradient-to-r from-[#4E7FFF]/20 to-purple-500/20 rounded-lg p-4 mb-4 border border-white/10">
           <p className="font-semibold mb-2">Зарабатывайте 10% с каждой покупки!</p>
           <p className="text-gray-600 dark:text-gray-400 text-sm">
@@ -3972,7 +3742,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
             </Label>
             <div className="flex mt-2">
               <Input
-                value={`https://t.me/starsexchange_bot?start=ref${user?.referralCode || '12345678'}`}
+                value={`https://t.me/starsexchange_bot?start=ref${user?.referral_code || '12345678'}`}
                 readOnly
                 className="flex-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20 text-sm text-gray-600 dark:text-gray-400"
               />
@@ -4017,7 +3787,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
       </motion.div>
 
       {/* Wallet Management */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -4027,7 +3797,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           <Wallet className="w-5 h-5 text-[#4E7FFF] mr-2" />
           Управление балансом
         </h3>
-        
+
         <div className="grid grid-cols-2 gap-3 mb-4">
           <Button
             onClick={() => hapticFeedback('light')}
@@ -4055,13 +3825,13 @@ export default function ProfileTab({ user }: ProfileTabProps) {
             TON покупки автоматически отправляются в ваш Telegram кошелек
           </p>
           <div className="mt-2 text-xs text-gray-500 dark:text-gray-500">
-            ID: {user?.telegramId || '123456'}
+            ID: {user?.telegram_id || '123456789'}
           </div>
         </div>
       </motion.div>
 
       {/* Transaction History */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -4071,7 +3841,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           <History className="w-5 h-5 text-purple-500 mr-2" />
           История покупок
         </h3>
-        
+
         <div className="space-y-3">
           <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10">
             <div className="flex items-center space-x-3">
@@ -4088,7 +3858,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
               <p className="text-gray-600 dark:text-gray-400 text-sm">₽241.50</p>
             </div>
           </div>
-          
+
           <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
@@ -4104,7 +3874,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
               <p className="text-gray-600 dark:text-gray-400 text-sm">₽220.76</p>
             </div>
           </div>
-          
+
           <Button
             onClick={() => hapticFeedback('light')}
             variant="outline"
@@ -4117,7 +3887,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
       </motion.div>
 
       {/* Settings */}
-      <motion.div 
+      <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -4148,6 +3918,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
   );
 }
 
+
 ================================================================================
 FILE: frontend\src\components\tasks-tab.tsx
 ================================================================================
@@ -4160,10 +3931,10 @@ import { useTelegram } from "@/hooks/use-telegram";
 import { CalendarDays, ThumbsUp, CheckCircle, Share, Users, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import type { User } from "@shared/schema";
+import type { SnakeCaseUser, User } from "@shared/schema";
 
 interface TasksTabProps {
-  user?: User;
+  user?: SnakeCaseUser;
 }
 
 interface TaskWithCompletion {
@@ -4273,7 +4044,7 @@ export default function TasksTab({ user }: TasksTabProps) {
     <div className="space-y-4">
       {/* Daily Tasks */}
       {dailyTasks.length > 0 && (
-        <motion.div 
+        <motion.div
           className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -4287,7 +4058,7 @@ export default function TasksTab({ user }: TasksTabProps) {
             {dailyTasks.map((task) => {
               const Icon = getTaskIcon(task.type, task.action);
               const iconColor = getTaskIconColor(task.type, task.action);
-              
+
               return (
                 <motion.div
                   key={task.id}
@@ -4333,7 +4104,7 @@ export default function TasksTab({ user }: TasksTabProps) {
 
       {/* Social Tasks */}
       {socialTasks.length > 0 && (
-        <motion.div 
+        <motion.div
           className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -4347,7 +4118,7 @@ export default function TasksTab({ user }: TasksTabProps) {
             {socialTasks.map((task) => {
               const Icon = getTaskIcon(task.type, task.action);
               const iconColor = getTaskIconColor(task.type, task.action);
-              
+
               return (
                 <motion.div
                   key={task.id}
@@ -4392,7 +4163,7 @@ export default function TasksTab({ user }: TasksTabProps) {
       )}
 
       {/* Progress */}
-      <motion.div 
+      <motion.div
         className="bg-gradient-to-r from-[#4E7FFF]/20 to-purple-500/20 rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -4408,7 +4179,7 @@ export default function TasksTab({ user }: TasksTabProps) {
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">Заработано сегодня</span>
             <span className="font-semibold text-yellow-500 flex items-center">
-              +{user?.dailyEarnings || 0} <Star className="w-4 h-4 ml-1" />
+              +{user?.daily_earnings || 0} <Star className="w-4 h-4 ml-1" />
             </span>
           </div>
         </div>
@@ -4434,8 +4205,9 @@ import BuyTab from "./buy-tab";
 import TasksTab from "./tasks-tab";
 import ProfileTab from "./profile-tab";
 import LoadingModal from "./loading-modal";
+import TelegramGuard from "./telegram-guard";
 import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Coins, TrendingUp } from "lucide-react";
-import type { User as UserType } from "../../shared/schema";
+import type { SnakeCaseUser, User as UserType } from "../../shared/schema";
 
 type TabType = 'buy' | 'earn' | 'sell' | 'profile';
 
@@ -4443,90 +4215,49 @@ export default function TelegramApp() {
   const [currentTab, setCurrentTab] = useState<TabType>('buy');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [isInitialized, setIsInitialized] = useState(false);
-  
-  const { user, isAvailable, hapticFeedback, initData } = useTelegram();
+
+  const { user, isAvailable, hapticFeedback } = useTelegram();
   const { theme, toggleTheme, isDark } = useTheme();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Debug logs
-  useEffect(() => {
-    console.log('Telegram user:', user);
-    console.log('Is available:', isAvailable);
-    console.log('Init data:', initData);
-  }, [user, isAvailable, initData]);
-
   // Initialize user
   const createUserMutation = useMutation({
     mutationFn: async (userData: any) => {
-      console.log('Creating user:', userData);
       const response = await apiRequest('POST', '/api/users', userData);
       return response.json();
     },
-    onSuccess: (data) => {
-      console.log('User created successfully:', data);
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users/me'] });
-      setIsInitialized(true);
-    },
-    onError: (error) => {
-      console.error('Error creating user:', error);
-      toast({
-        title: "Ошибка инициализации",
-        description: "Не удалось создать пользователя",
-        variant: "destructive",
-      });
     },
   });
 
-  // Get current user data - only query when we have a user
-  const { data: currentUser, isLoading: userLoading, error: userError } = useQuery<UserType>({
+  // Get current user data
+  const { data: currentUser, isLoading: userLoading } = useQuery<SnakeCaseUser>({
     queryKey: ['/api/users/me'],
-    enabled: !!user && isInitialized,
-    retry: false,
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/users/me');
+      return response.json();
+    },
+    enabled: !!user,
   });
 
-  // Initialize user when Telegram data becomes available
   useEffect(() => {
-    if (user && !isInitialized && !createUserMutation.isPending) {
-      console.log('Initializing user with Telegram data:', user);
-      
+    if (user && !currentUser && !userLoading) {
       createUserMutation.mutate({
-        telegramId: user.id.toString(),
+        telegram_id: user.id.toString(),
         username: user.username || null,
-        firstName: user.first_name,
-        lastName: user.last_name || null,
-        init_data: initData,
+        first_name: user.first_name,
+        last_name: user.last_name || null,
       });
     }
-  }, [user, isInitialized, createUserMutation.isPending, initData]);
-
-// Initialize user when Telegram data becomes available
-useEffect(() => {
-  // Логируем все данные, которые имеем
-  console.log("TelegramApp initialization:", {
-    user: user ? { id: user.id, username: user.username } : null,
-    isInitialized,
-    isPending: createUserMutation.isPending,
-    initDataLength: initData?.length || 0
-  });
-
-  if (user && !isInitialized && !createUserMutation.isPending) {
-    // Создаем пользователя с полными данными
-    createUserMutation.mutate({
-      telegramId: user.id.toString(), // Важно преобразовать в строку
-      username: user.username || null,
-      firstName: user.first_name,
-      lastName: user.last_name || null,
-      init_data: initData,
-    });
-  }
-}, [user, isInitialized, createUserMutation.isPending, initData]);
+  }, [user, currentUser, userLoading]);
 
   const handleTabChange = (tab: TabType) => {
     hapticFeedback('light');
     setCurrentTab(tab);
   };
+
 
   const showLoadingModal = (message: string) => {
     setLoadingMessage(message);
@@ -4545,16 +4276,10 @@ useEffect(() => {
     return (first + last).toUpperCase() || user.username?.[0]?.toUpperCase() || 'U';
   };
 
-  // Show loading while initializing
-  if (!user || (!isInitialized && createUserMutation.isPending) || userLoading) {
+  if (userLoading) {
     return (
-      <div className="min-h-screen bg-white dark:bg-[#0E0E10] flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin w-12 h-12 border-4 border-[#4E7FFF] border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">
-            {!user ? 'Загрузка Telegram...' : 'Инициализация пользователя...'}
-          </p>
-        </div>
+      <div className="min-h-screen bg-dark-bg dark:bg-dark-bg flex items-center justify-center">
+        <div className="animate-spin w-12 h-12 border-4 border-accent-blue border-t-transparent rounded-full"></div>
       </div>
     );
   }
@@ -4565,7 +4290,7 @@ useEffect(() => {
       <header className="sticky top-0 z-50 bg-white/80 dark:bg-[#0E0E10]/80 backdrop-blur-lg border-b border-gray-200 dark:border-white/10">
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center space-x-3">
-            <motion.div 
+            <motion.div
               className="w-8 h-8 bg-[#4E7FFF] rounded-lg flex items-center justify-center"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -4583,7 +4308,7 @@ useEffect(() => {
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </motion.button>
-            <motion.div 
+            <motion.div
               className="w-8 h-8 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center cursor-pointer"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -4598,6 +4323,7 @@ useEffect(() => {
       <main className="pb-20">
         <BalanceCard user={currentUser} />
 
+
         {/* Tab Content */}
         <AnimatePresence mode="wait">
           <motion.div
@@ -4609,8 +4335,8 @@ useEffect(() => {
             className="px-4"
           >
             {currentTab === 'buy' && (
-              <BuyTab 
-                user={currentUser} 
+              <BuyTab
+                user={currentUser}
                 onShowLoading={showLoadingModal}
                 onHideLoading={hideLoadingModal}
               />
@@ -4645,11 +4371,10 @@ useEffect(() => {
             <motion.button
               key={tab.id}
               onClick={() => handleTabChange(tab.id as TabType)}
-              className={`flex flex-col items-center py-2 px-4 transition-colors ${
-                currentTab === tab.id 
-                  ? 'text-[#4E7FFF]' 
-                  : 'text-gray-500 dark:text-gray-400'
-              }`}
+              className={`flex flex-col items-center py-2 px-4 transition-colors ${currentTab === tab.id
+                ? 'text-[#4E7FFF]'
+                : 'text-gray-500 dark:text-gray-400'
+                }`}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
@@ -4660,14 +4385,82 @@ useEffect(() => {
         </div>
       </nav>
 
+
       {/* Loading Modal */}
-      <LoadingModal 
-        isOpen={isLoading} 
-        message={loadingMessage} 
+      <LoadingModal
+        isOpen={isLoading}
+        message={loadingMessage}
       />
     </div>
   );
 }
+
+
+================================================================================
+FILE: frontend\src\components\telegram-guard.tsx
+================================================================================
+
+
+import { useTelegram } from "@/hooks/use-telegram";
+import { motion } from "framer-motion";
+import { MessageCircle, Smartphone, Monitor } from "lucide-react";
+
+interface TelegramGuardProps {
+  children: React.ReactNode;
+}
+
+export default function TelegramGuard({ children }: TelegramGuardProps) {
+  const { isAvailable, user } = useTelegram();
+
+  if (!isAvailable || !user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 text-center"
+        >
+          <div className="flex justify-center mb-6">
+            <div className="relative">
+              <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
+                <MessageCircle className="w-10 h-10 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="absolute -top-2 -right-2 w-8 h-8 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center">
+                <span className="text-red-600 dark:text-red-400 text-xl">!</span>
+              </div>
+            </div>
+          </div>
+          
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+            Доступ только через Telegram
+          </h1>
+          
+          <p className="text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">
+            Это приложение работает только внутри Telegram. 
+            Пожалуйста, откройте его через Telegram бота.
+          </p>
+          
+          <div className="space-y-4">
+            <div className="flex items-center justify-center space-x-4 text-sm text-gray-500 dark:text-gray-400">
+              <div className="flex items-center space-x-2">
+                <Smartphone className="w-4 h-4" />
+                <span>Мобильный</span>
+              </div>
+              <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
+              <div className="flex items-center space-x-2">
+                <Monitor className="w-4 h-4" />
+                <span>Десктоп</span>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 
 ================================================================================
 FILE: frontend\src\components\ui\accordion.tsx
@@ -9768,26 +9561,14 @@ export function useTelegram() {
   const [user, setUser] = useState<TelegramUser | null>(null);
   const [isAvailable, setIsAvailable] = useState(false);
   const [colorScheme, setColorScheme] = useState<'light' | 'dark'>('dark');
-  const [initData, setInitData] = useState<string | null>(null);
 
   useEffect(() => {
     const available = telegramWebApp.isAvailable();
     setIsAvailable(available);
-    
+
     if (available) {
       setUser(telegramWebApp.getUser());
       setColorScheme(telegramWebApp.getColorScheme());
-      setInitData(telegramWebApp.webApp?.initData || null);
-    } else {
-      // Mock user for development
-      setUser({
-        id: 56789,
-        first_name: 'John',
-        last_name: 'Doe',
-        username: 'johndoe',
-        language_code: 'en',
-      });
-      setInitData(null);
     }
   }, []);
 
@@ -9815,7 +9596,6 @@ export function useTelegram() {
     user,
     isAvailable,
     colorScheme,
-    initData,
     showAlert,
     showConfirm,
     hapticFeedback,
@@ -10071,7 +9851,6 @@ FILE: frontend\src\lib\queryClient.ts
 ================================================================================
 
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-import { telegramWebApp } from "./telegram";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -10080,45 +9859,22 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-function getTelegramHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  
-  // Получаем пользователя
-  const user = telegramWebApp.getUser();
-  if (user?.id) {
-    headers['x-telegram-id'] = user.id.toString();
-    console.log('Using Telegram ID:', user.id);
-  }
-  
-  // Передаем initData в заголовке - это самый важный параметр!
-  const initData = telegramWebApp.getInitData();
-  if (initData) {
-    headers['x-telegram-init-data'] = initData;
-    console.log('Using initData with length:', initData.length);
-  }
-  
-  return headers;
-}
-
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const telegramHeaders = getTelegramHeaders();
+  const headers: Record<string, string> = {};
   
-  const headers: Record<string, string> = {
-    ...telegramHeaders,
-  };
+  // Получаем initData из Telegram Web App
+  const initData = (window as any).Telegram?.WebApp?.initData;
+  if (initData) {
+    headers['x-telegram-init-data'] = initData;
+  }
   
   if (data) {
     headers['Content-Type'] = 'application/json';
   }
-  
-  console.log(`API ${method} ${url} headers:`, { 
-    telegramId: headers['x-telegram-id'] || '-', 
-    initDataLength: headers['x-telegram-init-data']?.length || 0 
-  });
   
   const res = await fetch(url, {
     method,
@@ -10137,10 +9893,16 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const telegramHeaders = getTelegramHeaders();
+    const headers: Record<string, string> = {};
+    
+    // Получаем initData из Telegram Web App
+    const initData = (window as any).Telegram?.WebApp?.initData;
+    if (initData) {
+      headers['x-telegram-init-data'] = initData;
+    }
     
     const res = await fetch(queryKey.join("/") as string, {
-      headers: telegramHeaders,
+      headers,
       credentials: "include",
     });
 
@@ -10166,6 +9928,7 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
 
 ================================================================================
 FILE: frontend\src\lib\telegram.ts
@@ -10269,15 +10032,6 @@ export class TelegramWebApp {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
       this.webApp = window.Telegram.WebApp;
       this.init();
-      
-      // Логируем информацию о WebApp для отладки
-      console.log('TelegramWebApp initialized:',
-        this.isAvailable() ? 'Available' : 'Not available',
-        'User:', this.getUser()?.id || 'No user',
-        'InitData length:', this.getInitData()?.length || 0
-      );
-    } else {
-      console.log('TelegramWebApp not available');
     }
   }
 
@@ -10290,12 +10044,8 @@ export class TelegramWebApp {
 
   private init() {
     if (this.webApp) {
-      try {
-        this.webApp.ready();
-        this.webApp.expand();
-      } catch (e) {
-        console.error('Error initializing Telegram WebApp:', e);
-      }
+      this.webApp.ready();
+      this.webApp.expand();
     }
   }
 
@@ -10304,23 +10054,7 @@ export class TelegramWebApp {
   }
 
   getUser(): TelegramUser | null {
-    try {
-      if (this.webApp?.initDataUnsafe?.user) {
-        return this.webApp.initDataUnsafe.user;
-      }
-    } catch (e) {
-      console.error('Error getting Telegram user:', e);
-    }
-    return null;
-  }
-
-  getInitData(): string | null {
-    try {
-      return this.webApp?.initData || null;
-    } catch (e) {
-      console.error('Error getting Telegram initData:', e);
-      return null;
-    }
+    return this.webApp?.initDataUnsafe?.user || null;
   }
 
   getStartParam(): string | null {
@@ -10370,6 +10104,9 @@ export class TelegramWebApp {
     if (this.webApp) {
       this.webApp.switchInlineQuery(query, chatTypes);
     }
+  }
+  getInitData(): string | null {
+    return this.webApp?.initData || null;
   }
 }
 
@@ -10628,11 +10365,15 @@ FILE: frontend\src\pages\home.tsx
 ================================================================================
 
 import TelegramApp from "@/components/telegram-app";
+import TelegramGuard from "@/components/telegram-guard";
 
 export default function Home() {
-  return <TelegramApp />;
+  return (
+    <TelegramGuard>
+      <TelegramApp />
+    </TelegramGuard>
+  );
 }
-
 
 ================================================================================
 FILE: frontend\src\pages\not-found.tsx

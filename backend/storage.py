@@ -1,12 +1,12 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_
-from sqlalchemy.orm import selectinload
-from models import User, Transaction, Task, UserTask, Setting
-from schemas import UserCreate, TransactionCreate, UserTaskCreate, SettingCreate
-from typing import Optional, List
+from typing import List, Optional, Dict, Any
 from datetime import datetime
-import random
-import string
+from sqlalchemy import select, update, delete, and_
+from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models import User, Transaction, Task, UserTask, Setting
+from schemas import UserCreate, TransactionCreate, UserTaskCreate
+
 
 class Storage:
     def __init__(self, db: AsyncSession):
@@ -23,18 +23,15 @@ class Storage:
         )
         return result.scalar_one_or_none()
 
-    async def create_user(self, user_data: UserCreate) -> User:
-        # Generate referral code
-        referral_code = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-        
-        user = User(
-            telegram_id=user_data.telegram_id,
-            username=user_data.username,
-            first_name=user_data.first_name,
-            last_name=user_data.last_name,
-            referral_code=referral_code,
+    async def get_user_by_username(self, username: str) -> Optional[User]:
+        """Получить пользователя по username"""
+        result = await self.db.execute(
+            select(User).where(User.username == username)
         )
-        
+        return result.scalar_one_or_none()
+
+    async def create_user(self, user_data: UserCreate) -> User:
+        user = User(**user_data.dict())
         self.db.add(user)
         await self.db.commit()
         await self.db.refresh(user)
@@ -43,6 +40,26 @@ class Storage:
     async def update_user(self, user_id: str, updates: dict) -> Optional[User]:
         await self.db.execute(
             update(User).where(User.id == user_id).values(**updates)
+        )
+        await self.db.commit()
+        return await self.get_user(user_id)
+
+    async def add_user_stars(self, user_id: str, amount: int) -> Optional[User]:
+        """Добавить звезды пользователю"""
+        user = await self.get_user(user_id)
+        if not user:
+            return None
+        
+        new_balance = user.stars_balance + amount
+        new_total = user.total_stars_earned + amount
+        
+        await self.db.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(
+                stars_balance=new_balance,
+                total_stars_earned=new_total
+            )
         )
         await self.db.commit()
         return await self.get_user(user_id)
@@ -93,7 +110,7 @@ class Storage:
         return result.scalar_one_or_none()
 
     async def get_all_tasks(self) -> List[Task]:
-        result = await self.db.execute(select(Task))
+        result = await self.db.execute(select(Task).order_by(Task.created_at.desc()))
         return result.scalars().all()
 
     async def get_active_tasks(self) -> List[Task]:
@@ -114,6 +131,25 @@ class Storage:
         await self.db.commit()
         return await self.get_task(task_id)
 
+    async def delete_task(self, task_id: str) -> bool:
+        """Удалить задание и все связанные записи"""
+        try:
+            # Сначала удаляем все связанные user_tasks
+            await self.db.execute(
+                delete(UserTask).where(UserTask.task_id == task_id)
+            )
+            
+            # Затем удаляем само задание
+            result = await self.db.execute(
+                delete(Task).where(Task.id == task_id)
+            )
+            
+            await self.db.commit()
+            return result.rowcount > 0
+        except Exception as e:
+            await self.db.rollback()
+            raise e
+
     # UserTask methods
     async def get_user_task(self, user_id: str, task_id: str) -> Optional[UserTask]:
         result = await self.db.execute(
@@ -128,6 +164,29 @@ class Storage:
             select(UserTask).where(UserTask.user_id == user_id)
         )
         return result.scalars().all()
+
+    async def get_user_tasks_with_task_info(self, user_id: str) -> List[Dict[str, Any]]:
+        """Получить задания пользователя с информацией о самих заданиях"""
+        result = await self.db.execute(
+            select(UserTask, Task)
+            .join(Task, UserTask.task_id == Task.id)
+            .where(UserTask.user_id == user_id)
+        )
+        
+        tasks_with_completion = []
+        for user_task, task in result.all():
+            tasks_with_completion.append({
+                "id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "reward": task.reward,
+                "type": task.type,
+                "action": task.action,
+                "completed": user_task.completed,
+                "completed_at": user_task.completed_at.isoformat() if user_task.completed_at else None,
+            })
+        
+        return tasks_with_completion
 
     async def create_user_task(self, user_task_data: UserTaskCreate) -> UserTask:
         user_task = UserTask(**user_task_data.dict())
@@ -145,6 +204,7 @@ class Storage:
         return result.scalar_one_or_none()
 
     async def complete_user_task(self, user_id: str, task_id: str) -> Optional[UserTask]:
+        """Отметить задание как выполненное"""
         user_task = await self.get_user_task(user_id, task_id)
         if not user_task or user_task.completed:
             return None
@@ -159,6 +219,14 @@ class Storage:
             .where(and_(UserTask.user_id == user_id, UserTask.task_id == task_id))
             .values(**updates)
         )
+        
+        # Обновляем счетчик выполненных заданий у пользователя
+        await self.db.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(tasks_completed=User.tasks_completed + 1)
+        )
+        
         await self.db.commit()
         return await self.get_user_task(user_id, task_id)
 
@@ -171,18 +239,166 @@ class Storage:
         result = await self.db.execute(select(Setting))
         return result.scalars().all()
 
-    async def set_setting(self, setting_data: SettingCreate) -> Setting:
-        setting = Setting(**setting_data.dict())
+    async def create_setting(self, key: str, value: str) -> Setting:
+        setting = Setting(key=key, value=value)
         self.db.add(setting)
         await self.db.commit()
         await self.db.refresh(setting)
         return setting
 
-    async def update_setting(self, key: str, value: str) -> Optional[Setting]:
+    async def update_setting(self, key: str, value: str) -> Setting:
+        """Обновить или создать настройку"""
+        existing_setting = await self.get_setting(key)
+        
+        if existing_setting:
+            await self.db.execute(
+                update(Setting)
+                .where(Setting.key == key)
+                .values(value=value, updated_at=datetime.utcnow())
+            )
+            await self.db.commit()
+            return await self.get_setting(key)
+        else:
+            return await self.create_setting(key, value)
+
+    async def delete_setting(self, key: str) -> bool:
+        result = await self.db.execute(delete(Setting).where(Setting.key == key))
+        await self.db.commit()
+        return result.rowcount > 0
+
+    # Referral methods
+    async def get_user_referrals(self, user_id: str) -> List[User]:
+        """Получить всех рефералов пользователя"""
+        user = await self.get_user(user_id)
+        if not user or not user.referral_code:
+            return []
+        
+        result = await self.db.execute(
+            select(User).where(User.referred_by == user.referral_code)
+        )
+        return result.scalars().all()
+
+    async def get_referral_earnings(self, user_id: str) -> int:
+        """Получить общий заработок с рефералов"""
+        user = await self.get_user(user_id)
+        if not user:
+            return 0
+        return user.total_referral_earnings
+
+    async def add_referral_earnings(self, user_id: str, amount: int) -> Optional[User]:
+        """Добавить заработок с рефералов"""
         await self.db.execute(
-            update(Setting)
-            .where(Setting.key == key)
-            .values(value=value, updated_at=datetime.utcnow())
+            update(User)
+            .where(User.id == user_id)
+            .values(total_referral_earnings=User.total_referral_earnings + amount)
         )
         await self.db.commit()
-        return await self.get_setting(key)
+        return await self.get_user(user_id)
+
+    # Analytics methods
+    async def get_users_count(self) -> int:
+        """Получить общее количество пользователей"""
+        result = await self.db.execute(select(User).count())
+        return result.scalar()
+
+    async def get_completed_transactions_today(self) -> List[Transaction]:
+        """Получить завершенные транзакции за сегодня"""
+        today = datetime.utcnow().date()
+        result = await self.db.execute(
+            select(Transaction)
+            .where(
+                and_(
+                    Transaction.status == "completed",
+                    Transaction.created_at >= today
+                )
+            )
+        )
+        return result.scalars().all()
+
+    async def get_active_referrals_count(self) -> int:
+        """Получить количество пользователей с рефералом"""
+        result = await self.db.execute(
+            select(User)
+            .where(User.referred_by.isnot(None))
+        )
+        return len(result.scalars().all())
+
+    # Daily task automation
+    async def get_daily_login_task(self) -> Optional[Task]:
+        """Получить задание ежедневного входа"""
+        result = await self.db.execute(
+            select(Task).where(
+                and_(
+                    Task.action == "daily_login",
+                    Task.is_active == True
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def check_daily_task_completion(self, user_id: str, task_id: str) -> bool:
+        """Проверить, выполнял ли пользователь задание сегодня"""
+        today = datetime.utcnow().date()
+        result = await self.db.execute(
+            select(UserTask).where(
+                and_(
+                    UserTask.user_id == user_id,
+                    UserTask.task_id == task_id,
+                    UserTask.completed == True,
+                    UserTask.completed_at >= today
+                )
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def ensure_user_task_exists(self, user_id: str, task_id: str) -> UserTask:
+        """Убедиться, что запись UserTask существует"""
+        user_task = await self.get_user_task(user_id, task_id)
+        if not user_task:
+            user_task_data = UserTaskCreate(user_id=user_id, task_id=task_id)
+            user_task = await self.create_user_task(user_task_data)
+        return user_task
+
+    # Batch operations
+    async def create_user_tasks_for_new_task(self, task_id: str) -> int:
+        """Создать записи UserTask для всех пользователей при создании нового задания"""
+        users = await self.get_all_users()
+        count = 0
+        
+        for user in users:
+            existing = await self.get_user_task(user.id, task_id)
+            if not existing:
+                user_task_data = UserTaskCreate(user_id=user.id, task_id=task_id)
+                await self.create_user_task(user_task_data)
+                count += 1
+        
+        return count
+
+    async def process_referral_bonus(self, referrer_code: str, bonus_amount: int) -> bool:
+        """Обработать бонус реферера"""
+        try:
+            result = await self.db.execute(
+                select(User).where(User.referral_code == referrer_code)
+            )
+            referrer = result.scalar_one_or_none()
+            
+            if referrer:
+                await self.add_user_stars(referrer.id, bonus_amount)
+                await self.add_referral_earnings(referrer.id, bonus_amount)
+                
+                # Создать транзакцию бонуса
+                bonus_transaction = TransactionCreate(
+                    user_id=referrer.id,
+                    type="referral_bonus",
+                    currency="stars",
+                    amount=bonus_amount,
+                    status="completed",
+                    description=f"Бонус с реферала: {bonus_amount} звезд"
+                )
+                await self.create_transaction(bonus_transaction)
+                return True
+            
+            return False
+        except Exception as e:
+            await self.db.rollback()
+            raise e
