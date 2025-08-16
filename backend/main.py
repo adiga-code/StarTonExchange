@@ -15,7 +15,7 @@ import uvicorn
 from database import AsyncSessionLocal, init_db, init_default_data
 from storage import Storage
 from schemas import *
-from auth import get_current_user
+from telegram_auth import get_current_user
 from models import User
 
 # Setup logging
