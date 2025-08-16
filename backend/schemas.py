@@ -138,9 +138,10 @@ class PurchaseCalculateResponse(BaseModel):
     amount: float
 
 class PurchaseRequest(BaseModel):
-    currency: str  # Will validate in endpoint logic
+    currency: str
     amount: float = Field(..., gt=0)
     rub_amount: float = Field(..., gt=0)
+    username: Optional[str] = None  # ← ДОБАВЬ ЭТУ СТРОКУ
 
 class PurchaseResponse(BaseModel):
     transaction: TransactionResponse
