@@ -47,7 +47,7 @@ class TaskCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: str = Field(..., min_length=1, max_length=1000)
     reward: int = Field(..., gt=0, le=10000)
-    type: str = Field(..., regex="^(daily|social|referral)$")
+    type: str = Field(..., pattern="^(daily|social|referral)$")  # Заменили regex на pattern
     action: Optional[str] = Field(None, max_length=100)
     is_active: bool = True
 
@@ -55,7 +55,7 @@ class TaskUpdateRequest(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = Field(None, min_length=1, max_length=1000)
     reward: Optional[int] = Field(None, gt=0, le=10000)
-    type: Optional[str] = Field(None, regex="^(daily|social|referral)$")
+    type: Optional[str] = Field(None, pattern="^(daily|social|referral)$")  # Заменили regex на pattern
     action: Optional[str] = Field(None, max_length=100)
     is_active: Optional[bool] = None
 

@@ -129,7 +129,7 @@ class SettingResponse(BaseModel):
 
 # Purchase schemas
 class PurchaseCalculate(BaseModel):
-    currency: str = Field(..., regex="^(stars|ton)$")
+    currency: str = Field(..., pattern="^(stars|ton)$")  # Заменили regex на pattern
     amount: float = Field(..., gt=0)
 
 class PurchaseCalculateResponse(BaseModel):
@@ -140,7 +140,7 @@ class PurchaseCalculateResponse(BaseModel):
     amount: float
 
 class PurchaseRequest(BaseModel):
-    currency: str = Field(..., regex="^(stars|ton)$")
+    currency: str = Field(..., pattern="^(stars|ton)$")  # Заменили regex на pattern
     amount: float = Field(..., gt=0)
     rub_amount: float = Field(..., gt=0)
     target_user_id: Optional[str] = None
