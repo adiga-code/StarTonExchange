@@ -5,8 +5,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - DEVELOPMENT=${DEVELOPMENT}
+      - DATABASE_URL=sqlite+aiosqlite:///./data/app.db
+      - DEVELOPMENT=false
       - BOT_TOKEN=${BOT_TOKEN}
       - ROBOKASSA_MERCHANT_LOGIN=${ROBOKASSA_MERCHANT_LOGIN}
       - ROBOKASSA_PASSWORD1=${ROBOKASSA_PASSWORD1}
@@ -39,8 +39,8 @@ services:
   nginx:
     image: nginx:alpine
     ports:
-      - "${NGINX_HTTP_PORT}:80"
-      - "${NGINX_HTTPS_PORT}:443"
+      - "8080:80"
+      - "8443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
