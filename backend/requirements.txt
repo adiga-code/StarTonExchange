@@ -1,44 +1,22 @@
-# FastAPI and dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+# FastAPI and web framework
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
 
 # Database
-sqlalchemy==2.0.23
-aiosqlite==0.19.0
+sqlalchemy[asyncio]==2.0.36
+aiosqlite==0.20.0
 
-# Pydantic for data validation
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# Telegram Bot
+aiogram==3.15.0
 
-# Telegram Bot API
-aiogram==3.2.0
-
-# Environment variables
-python-dotenv==1.0.0
+# Environment and configuration
+python-dotenv==1.0.1
 
 # HTTP client for external APIs
-aiohttp==3.9.1
-httpx==0.25.2
+httpx==0.28.1
 
-# Cryptography and security
-cryptography==41.0.8
+# Data validation - compatible with aiogram
+pydantic>=2.4.1,<2.10
 
-# Date and time utilities
-python-dateutil==2.8.2
-
-# Async utilities
-asyncio-mqtt==0.16.1
-
-# Development dependencies
-pytest==7.4.3
-pytest-asyncio==0.21.1
-black==23.11.0
-flake8==6.1.0
-
-# Optional: Redis for caching (if needed)
-# redis==5.0.1
-# aioredis==2.0.1
-
-# Optional: Celery for background tasks (if needed)
-# celery==5.3.4
+# Cryptography for payment signatures
+cryptography==44.0.3
