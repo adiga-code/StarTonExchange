@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -36,7 +36,42 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
   const { toast } = useToast();
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
+  const timeoutRef = useRef<NodeJS.Timeout>();
 
+  const fetchUserPhoto = async (username: string) => {
+    try {
+      const response = await fetch(`/api/getPhoto?username=${username}`);
+      const data = await response.json();
+      if (data.success) {
+        setUserPhoto(data);
+        setUserError('');
+      } else {
+        setUserError('Пользователь не найден');
+      }
+    } catch {
+      setUserError('Пользователь не найден');
+    }
+  };
+
+  useEffect(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    
+    if (!recipientUsername) {
+      setUserPhoto(null);
+      setUserError('');
+      return;
+    }
+    
+    if (recipientUsername.length >= 1) {
+      timeoutRef.current = setTimeout(() => {
+        fetchUserPhoto(recipientUsername.trim());
+      }, 2000);
+    }
+    
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [recipientUsername]);
   // Calculate price
   const { data: priceCalculation } = useQuery({
     queryKey: ['/api/purchase/calculate', selectedCurrency, amount],
@@ -298,19 +333,10 @@ return (
                 setRecipientUsername(e.target.value);
                 setUserError('');
               }}
-              onKeyDown={async (e) => {
+              onKeyDown={(e) => {
                 if (e.key === 'Enter' && recipientUsername.trim()) {
-                  try {
-                    const response = await fetch(`/api/getPhoto?username=${recipientUsername.trim()}`);
-                    const data = await response.json();
-                    if (data.success) {
-                      setUserPhoto(data);
-                    } else {
-                      setUserError('Пользователь не найден');
-                    }
-                  } catch {
-                    setUserError('Пользователь не найден');
-                  }
+                  if (timeoutRef.current) clearTimeout(timeoutRef.current);
+                  fetchUserPhoto(recipientUsername.trim());
                 }
               }}
               placeholder={userError || "Введите @username и нажмите Enter"}
