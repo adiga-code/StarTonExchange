@@ -72,7 +72,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     if (recipientUsername.length >= 1) {
       timeoutRef.current = setTimeout(() => {
         fetchUserPhoto(recipientUsername.trim());
-      }, 500);
+      }, 50);
     }
     
     return () => {
