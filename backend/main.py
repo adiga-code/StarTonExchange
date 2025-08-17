@@ -120,23 +120,31 @@ async def update_current_user(
 
 @app.get("/api/getPhoto")
 async def get_photo(username: str):
+    logger.info(f"Getting photo for username: {username}")
     try:
         client = await get_telegram_client()
         if not client:
+            logger.error("Failed to get telegram client")
             return {"error": "Service temporarily unavailable", "success": False}
         
         clean_username = username.lstrip('@')
+        logger.info(f"Clean username: {clean_username}")
         
         async with client:
+            logger.info("Connected to telegram client")
             user = await client.get_users(clean_username)
+            logger.info(f"Found user: {user.first_name}, has_photo: {bool(user.photo)}")
             
             if user.photo:
+                logger.info("Downloading photo...")
                 # Скачиваем в память
                 photo_bytes = await client.download_media(user.photo.big_file_id, in_memory=True)
+                logger.info(f"Downloaded photo, size: {len(photo_bytes.getvalue())} bytes")
                 
                 # Конвертируем в base64
                 photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode()
                 photo_url = f"data:image/jpeg;base64,{photo_base64}"
+                logger.info("Photo converted to base64")
                 
                 return {
                     "photo_url": photo_url,
@@ -144,6 +152,7 @@ async def get_photo(username: str):
                     "success": True
                 }
             else:
+                logger.info("User has no photo, using avatar")
                 # Заглушка если нет фото
                 avatar_url = f"https://ui-avatars.com/api/?name={clean_username}&size=128&background=4E7FFF&color=fff"
                 return {
@@ -152,12 +161,14 @@ async def get_photo(username: str):
                     "success": True
                 }
                 
-    except (UsernameNotOccupied, UsernameInvalid):
+    except (UsernameNotOccupied, UsernameInvalid) as e:
+        logger.warning(f"User not found: {e}")
         return {"error": "User not found", "success": False}
-    except (FloodWait, AuthKeyUnregistered):
+    except (FloodWait, AuthKeyUnregistered) as e:
+        logger.error(f"Telegram API error: {e}")
         return {"error": "Service temporarily unavailable", "success": False}
     except Exception as e:
-        logger.error(f"Error getting photo for {username}: {e}")
+        logger.error(f"Unexpected error getting photo for {username}: {e}")
         return {"error": "User not found", "success": False}
 
 
