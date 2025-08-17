@@ -95,7 +95,9 @@ class Storage:
 
     # Task methods
     async def get_task(self, task_id: str) -> Optional[Task]:
-        result = await self.db.execute(select(Task).where(Task.id == task_id))
+        result = await self.db.execute(
+            select(Task).where(Task.id == task_id)
+        )
         return result.scalar_one_or_none()
 
     async def get_all_tasks(self) -> List[Task]:

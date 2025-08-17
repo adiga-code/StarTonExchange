@@ -64,8 +64,16 @@ class Task(Base):
     description = Column(Text, nullable=False)
     reward = Column(Integer, nullable=False)
     type = Column(String, nullable=False)  # 'daily', 'social', 'referral'
-    action = Column(String, nullable=True)  # 'daily_login', 'share_app', 'follow_channel'
+    action = Column(String, nullable=True)  # 'daily_login', 'share_app', etc.
     is_active = Column(Boolean, default=True)
+    
+    # ✅ ДОБАВИТЬ ЭТИ ПОЛЯ:
+    status = Column(String, default="active")  # 'draft', 'active', 'paused', 'expired'
+    deadline = Column(DateTime, nullable=True)
+    max_completions = Column(Integer, nullable=True)
+    requirements = Column(Text, nullable=True)
+    completed_count = Column(Integer, default=0)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships

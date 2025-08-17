@@ -84,6 +84,14 @@ class TaskResponse(BaseModel):
     type: str
     action: Optional[str]
     is_active: bool
+    
+    # ✅ ДОБАВИТЬ ЭТИ ПОЛЯ:
+    status: Optional[str] = "active"
+    deadline: Optional[datetime] = None
+    max_completions: Optional[int] = None
+    requirements: Optional[str] = None
+    completed_count: Optional[int] = 0
+    
     created_at: datetime
     completed: Optional[bool] = False
     completed_at: Optional[datetime] = None
