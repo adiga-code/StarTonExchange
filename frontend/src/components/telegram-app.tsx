@@ -1,3 +1,4 @@
+// frontend/src/components/telegram-app.tsx (модифицированная версия)
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTelegram } from "@/hooks/use-telegram";
@@ -5,17 +6,22 @@ import { useTheme } from "@/hooks/use-theme";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useUserAvatar } from "@/hooks/use-user-avatar";
+import { usePreloadAvatar } from "@/hooks/use-preload-avatar"; // ← НОВЫЙ ХУК
 import BalanceCard from "./balance-card";
 import BuyTab from "./buy-tab";
 import TasksTab from "./tasks-tab";
 import ProfileTab from "./profile-tab";
 import LoadingModal from "./loading-modal";
 import TelegramGuard from "./telegram-guard";
-import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Coins, TrendingUp } from "lucide-react";
+import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Coins, TrendingUp, Loader2 } from "lucide-react";
 import type { SnakeCaseUser, User as UserType } from "../../shared/schema";
 
 type TabType = 'buy' | 'earn' | 'sell' | 'profile';
+
+interface AvatarData {
+  photo_url: string;
+  first_name: string;
+}
 
 export default function TelegramApp() {
   const [currentTab, setCurrentTab] = useState<TabType>('buy');
@@ -45,9 +51,11 @@ export default function TelegramApp() {
       const response = await apiRequest('GET', '/api/users/me');
       return response.json();
     },
-    enabled: !!user,
+    enabled: !user,
   });
-  const userAvatar = useUserAvatar(currentUser?.username);
+
+  // ← НОВОЕ: Предзагружаем аватарку после получения пользователя
+  const { avatar: userAvatar, isLoading: avatarLoading } = usePreloadAvatar(currentUser);
 
   useEffect(() => {
     if (user && !currentUser && !userLoading) {
@@ -64,7 +72,6 @@ export default function TelegramApp() {
     hapticFeedback('light');
     setCurrentTab(tab);
   };
-
 
   const showLoadingModal = (message: string) => {
     setLoadingMessage(message);
@@ -83,10 +90,31 @@ export default function TelegramApp() {
     return (first + last).toUpperCase() || user.username?.[0]?.toUpperCase() || 'U';
   };
 
-  if (userLoading) {
+  // ← НОВОЕ: Показываем лоадер пока загружаются пользователь ИЛИ его аватарка
+  const isInitialLoading = userLoading || (currentUser?.username && avatarLoading);
+
+  if (isInitialLoading) {
     return (
-      <div className="min-h-screen bg-dark-bg dark:bg-dark-bg flex items-center justify-center">
-        <div className="animate-spin w-12 h-12 border-4 border-accent-blue border-t-transparent rounded-full"></div>
+      <div className="min-h-screen bg-white dark:bg-[#0E0E10] flex items-center justify-center">
+        <motion.div
+          className="flex flex-col items-center space-y-4"
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+        >
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          >
+            <Loader2 className="w-12 h-12 text-[#4E7FFF]" />
+          </motion.div>
+          <div className="text-center">
+            <h3 className="text-lg font-semibold mb-2">Загрузка профиля</h3>
+            <p className="text-gray-600 dark:text-gray-400">
+              {userLoading ? 'Получение данных пользователя...' : 'Загрузка аватарки...'}
+            </p>
+          </div>
+        </motion.div>
       </div>
     );
   }
@@ -115,11 +143,15 @@ export default function TelegramApp() {
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </motion.button>
+            {/* ← ИЗМЕНЕННОЕ: Используем предзагруженную аватарку */}
             {userAvatar?.photo_url ? (
-              <img 
+              <motion.img 
                 src={userAvatar.photo_url} 
                 alt="Avatar" 
-                className="w-8 h-8 rounded-full"
+                className="w-8 h-8 rounded-full object-cover"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.2 }}
               />
             ) : (
               <motion.div
@@ -137,7 +169,6 @@ export default function TelegramApp() {
       {/* Main Content */}
       <main className="pb-20">
         <BalanceCard user={currentUser} />
-
 
         {/* Tab Content */}
         <AnimatePresence mode="wait">
@@ -169,7 +200,13 @@ export default function TelegramApp() {
                 </div>
               </div>
             )}
-            {currentTab === 'profile' && <ProfileTab user={currentUser} />}
+            {/* ← ИЗМЕНЕННОЕ: Передаем предзагруженную аватарку как пропс */}
+            {currentTab === 'profile' && (
+              <ProfileTab 
+                user={currentUser} 
+                userAvatar={userAvatar}
+              />
+            )}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -186,10 +223,11 @@ export default function TelegramApp() {
             <motion.button
               key={tab.id}
               onClick={() => handleTabChange(tab.id as TabType)}
-              className={`flex flex-col items-center py-2 px-4 transition-colors ${currentTab === tab.id
-                ? 'text-[#4E7FFF]'
-                : 'text-gray-500 dark:text-gray-400'
-                }`}
+              className={`flex flex-col items-center py-2 px-4 transition-colors ${
+                currentTab === tab.id
+                  ? 'text-[#4E7FFF]'
+                  : 'text-gray-500 dark:text-gray-400'
+              }`}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
@@ -199,7 +237,6 @@ export default function TelegramApp() {
           ))}
         </div>
       </nav>
-
 
       {/* Loading Modal */}
       <LoadingModal
