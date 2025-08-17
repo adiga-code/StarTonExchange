@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_
+from sqlalchemy import select, update, and_, func
 from sqlalchemy.orm import selectinload
 from models import User, Transaction, Task, UserTask, Setting
 from schemas import UserCreate, TransactionCreate, UserTaskCreate, SettingCreate
