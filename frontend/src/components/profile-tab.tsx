@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useTelegram } from "@/hooks/use-telegram";
+import { useUserAvatar } from "@/hooks/use-user-avatar";
 import { useToast } from "@/hooks/use-toast";
 import { Users, Copy, Share, Star, Bell, Palette, Plus, Minus, Wallet, CreditCard, History, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ interface ProfileTabProps {
 export default function ProfileTab({ user }: ProfileTabProps) {
   const { toast } = useToast();
   const { hapticFeedback, shareApp } = useTelegram();
+  const userAvatar = useUserAvatar(user?.username);
 
   const { data: referralStats } = useQuery({
     queryKey: ['/api/referrals/stats'],
@@ -68,12 +70,20 @@ export default function ProfileTab({ user }: ProfileTabProps) {
         transition={{ duration: 0.3 }}
       >
         <div className="flex items-center space-x-4 mb-4">
-          <motion.div
-            className="w-16 h-16 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center"
-            whileHover={{ scale: 1.05 }}
-          >
-            <span className="text-xl font-bold text-white">{getUserInitials()}</span>
-          </motion.div>
+          {userAvatar?.photo_url ? (
+            <img 
+              src={userAvatar.photo_url} 
+              alt="Avatar" 
+              className="w-16 h-16 rounded-full object-cover"
+            />
+          ) : (
+            <motion.div
+              className="w-16 h-16 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center"
+              whileHover={{ scale: 1.05 }}
+            >
+              <span className="text-xl font-bold text-white">{getUserInitials()}</span>
+            </motion.div>
+          )}
           <div>
             <h3 className="text-xl font-bold">
               {user?.first_name} {user?.last_name}

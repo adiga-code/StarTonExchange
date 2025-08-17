@@ -5,6 +5,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useUserAvatar } from "@/hooks/use-user-avatar";
 import BalanceCard from "./balance-card";
 import BuyTab from "./buy-tab";
 import TasksTab from "./tasks-tab";
@@ -25,6 +26,7 @@ export default function TelegramApp() {
   const { theme, toggleTheme, isDark } = useTheme();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const userAvatar = useUserAvatar(currentUser?.username);
 
   // Initialize user
   const createUserMutation = useMutation({
@@ -113,13 +115,21 @@ export default function TelegramApp() {
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </motion.button>
-            <motion.div
-              className="w-8 h-8 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center cursor-pointer"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <span className="text-xs font-bold text-white">{getUserInitials()}</span>
-            </motion.div>
+            {userAvatar?.photo_url ? (
+              <img 
+                src={userAvatar.photo_url} 
+                alt="Avatar" 
+                className="w-8 h-8 rounded-full"
+              />
+            ) : (
+              <motion.div
+                className="w-8 h-8 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center cursor-pointer"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <span className="text-xs font-bold text-white">{getUserInitials()}</span>
+              </motion.div>
+            )}
           </div>
         </div>
       </header>
