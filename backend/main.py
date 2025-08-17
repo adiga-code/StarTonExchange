@@ -71,23 +71,17 @@ async def get_authenticated_user(
     return user
 
 telegram_client = None
+connected_client = None
 
-async def get_telegram_client():
-    global telegram_client
-    if telegram_client is None:
+async def ensure_telegram_connection():
+    global connected_client
+    if connected_client is None:
         session_string = os.getenv('TELEGRAM_SESSION_STRING')
-        
         if session_string:
-            logger.info("Using session string")
-            telegram_client = Client("my_account", session_string=session_string)
-        else:
-            logger.info("Using file session")
-            api_id = os.getenv('TELEGRAM_API_ID')
-            api_hash = os.getenv('TELEGRAM_API_HASH')
-            telegram_client = Client("my_account", api_id=int(api_id), api_hash=api_hash)
-        
-        logger.info("Telegram client created")
-    return telegram_client
+            connected_client = Client("my_account", session_string=session_string)
+            await connected_client.start()
+            logger.info("Global telegram session started")
+    return connected_client
 
 # User routes
 @app.post("/api/users", response_model=UserResponse)
@@ -129,53 +123,37 @@ async def update_current_user(
 async def get_photo(username: str):
     logger.info(f"Getting photo for username: {username}")
     try:
-        client = await get_telegram_client()
+        client = await ensure_telegram_connection()
         if not client:
-            logger.error("Failed to get telegram client")
             return {"error": "Service temporarily unavailable", "success": False}
         
         clean_username = username.lstrip('@')
-        logger.info(f"Clean username: {clean_username}")
         
-        async with client:
-            logger.info("Connected to telegram client")
-            user = await client.get_users(clean_username)
-            logger.info(f"Found user: {user.first_name}, has_photo: {bool(user.photo)}")
+        # БЕЗ async with - используем уже подключенного клиента
+        user = await client.get_users(clean_username)
+        logger.info(f"Found user: {user.first_name}, has_photo: {bool(user.photo)}")
+        
+        if user.photo:
+            photo_bytes = await client.download_media(user.photo.big_file_id, in_memory=True)
+            photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode()
+            photo_url = f"data:image/jpeg;base64,{photo_base64}"
             
-            if user.photo:
-                logger.info("Downloading photo...")
-                # Скачиваем в память
-                photo_bytes = await client.download_media(user.photo.big_file_id, in_memory=True)
-                logger.info(f"Downloaded photo, size: {len(photo_bytes.getvalue())} bytes")
-                
-                # Конвертируем в base64
-                photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode()
-                photo_url = f"data:image/jpeg;base64,{photo_base64}"
-                logger.info("Photo converted to base64")
-                
-                return {
-                    "photo_url": photo_url,
-                    "first_name": user.first_name or clean_username,
-                    "success": True
-                }
-            else:
-                logger.info("User has no photo, using avatar")
-                # Заглушка если нет фото
-                avatar_url = f"https://ui-avatars.com/api/?name={clean_username}&size=128&background=4E7FFF&color=fff"
-                return {
-                    "photo_url": avatar_url,
-                    "first_name": user.first_name or clean_username,
-                    "success": True
-                }
-                
-    except (UsernameNotOccupied, UsernameInvalid) as e:
-        logger.warning(f"User not found: {e}")
+            return {
+                "photo_url": photo_url,
+                "first_name": user.first_name or clean_username,
+                "success": True
+            }
+        else:
+            avatar_url = f"https://ui-avatars.com/api/?name={clean_username}&size=128&background=4E7FFF&color=fff"
+            return {
+                "photo_url": avatar_url,
+                "first_name": user.first_name or clean_username,
+                "success": True
+            }
+    except (UsernameNotOccupied, UsernameInvalid):
         return {"error": "User not found", "success": False}
-    except (FloodWait, AuthKeyUnregistered) as e:
-        logger.error(f"Telegram API error: {e}")
-        return {"error": "Service temporarily unavailable", "success": False}
     except Exception as e:
-        logger.error(f"Unexpected error getting photo for {username}: {e}")
+        logger.error(f"Error: {e}")
         return {"error": "User not found", "success": False}
 
 

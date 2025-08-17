@@ -42,18 +42,21 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     try {
       const response = await fetch(`/api/getPhoto?username=${username}`);
       const data = await response.json();
-      console.log('Response data:', data); // ← ДОБАВЬ ЭТУ СТРОКУ
+      console.log('API response:', data); // ← ДОБАВЬ
       
       if (data.success) {
         setUserPhoto(data);
         setUserError('');
+        console.log('Photo set successfully'); // ← ДОБАВЬ
       } else {
         setUserError(data.error === "Service temporarily unavailable" 
           ? "Сервис временно недоступен" 
           : "Пользователь не найден");
+        console.log('Error set:', data.error); // ← ДОБАВЬ
       }
     } catch {
       setUserError('Пользователь не найден');
+      console.log('Catch error'); // ← ДОБАВЬ
     }
   };
 
@@ -69,7 +72,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     if (recipientUsername.length >= 1) {
       timeoutRef.current = setTimeout(() => {
         fetchUserPhoto(recipientUsername.trim());
-      }, 2000);
+      }, 500);
     }
     
     return () => {
