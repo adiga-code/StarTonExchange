@@ -75,12 +75,21 @@ connected_client = None
 
 async def ensure_telegram_connection():
     global connected_client
+    logger.info(f"Current connected_client state: {connected_client}")
+    
     if connected_client is None:
+        logger.info("Creating new telegram connection...")
         session_string = os.getenv('TELEGRAM_SESSION_STRING')
         if session_string:
             connected_client = Client("my_account", session_string=session_string)
             await connected_client.start()
             logger.info("Global telegram session started")
+        else:
+            logger.error("No session string found")
+            return None
+    else:
+        logger.info("Using existing telegram connection")
+    
     return connected_client
 
 # User routes
