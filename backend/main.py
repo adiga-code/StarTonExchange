@@ -663,10 +663,18 @@ async def create_task_admin(
             except:
                 max_completions = None
         
-        requirements = task_data.get("requirements")
-        if requirements == "":
+        requirements = task_data.get("requirements") or "{}"
+        url = task_data.get("url")
+        if url:
+            import json
+            try:
+                req_data = json.loads(requirements) if requirements else {}
+            except:
+                req_data = {}
+            req_data["url"] = url
+            requirements = json.dumps(req_data)
+        elif requirements == "":
             requirements = None
-            
         # Создаем задание с правильными типами данных
         new_task = await storage.create_task({
             "title": task_data["title"],
@@ -734,8 +742,19 @@ async def update_task_admin(
             except:
                 max_completions = None
         
-        requirements = task_data.get("requirements")
-        if requirements == "":
+        requirements = task_data.get("requirements") or "{}"
+        url = task_data.get("url")
+
+        # Если есть URL, добавляем в requirements как JSON
+        if url:
+            import json
+            try:
+                req_data = json.loads(requirements) if requirements else {}
+            except:
+                req_data = {}
+            req_data["url"] = url
+            requirements = json.dumps(req_data)
+        elif requirements == "":
             requirements = None
             
         # Подготавливаем данные для обновления

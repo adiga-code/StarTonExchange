@@ -25,6 +25,7 @@ const TaskAdminPage = () => {
     deadline: '',
     maxCompletions: '',
     requirements: '',
+    url: '',  // ✅ ДОБАВЛЕНО
     isActive: true
   });
 
@@ -60,8 +61,8 @@ const TaskAdminPage = () => {
     }
   };
 
+  // ✅ ИСПРАВЛЕННЫЙ handleSubmit:
   const handleSubmit = async () => {
-    
     try {
       const url = editingTask 
         ? `/api/admin/tasks/${editingTask.id}` 
@@ -69,16 +70,50 @@ const TaskAdminPage = () => {
       
       const method = editingTask ? 'PUT' : 'POST';
       
+      // ✅ ОЧИЩАЕМ ДАННЫЕ ПЕРЕД ОТПРАВКОЙ
+      const cleanFormData = {
+        title: formData.title,
+        description: formData.description,
+        reward: formData.reward,
+        type: formData.type,
+        status: formData.status,
+        isActive: formData.isActive
+      };
+      
+      // Добавляем опциональные поля только если они не пустые
+      if (formData.action && formData.action.trim() !== '') {
+        cleanFormData.action = formData.action;
+      }
+      
+      if (formData.deadline && formData.deadline.trim() !== '') {
+        cleanFormData.deadline = formData.deadline;
+      }
+      
+      if (formData.maxCompletions && formData.maxCompletions.trim() !== '') {
+        cleanFormData.maxCompletions = formData.maxCompletions;
+      }
+      
+      if (formData.requirements && formData.requirements.trim() !== '') {
+        cleanFormData.requirements = formData.requirements;
+      }
+      
+      if (formData.url && formData.url.trim() !== '') {
+        cleanFormData.url = formData.url;  // ✅ ДОБАВЛЕНО
+      }
+      
       const response = await fetch(`${url}?token=${token}`, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(cleanFormData)  // ✅ Отправляем очищенные данные
       });
 
       if (response.ok) {
         resetForm();
         loadTasks(token);
         alert(editingTask ? 'Задание обновлено!' : 'Задание создано!');
+      } else {
+        const error = await response.text();
+        alert('Ошибка: ' + error);
       }
     } catch (error) {
       alert('Ошибка: ' + error.message);
@@ -88,7 +123,9 @@ const TaskAdminPage = () => {
   const resetForm = () => {
     setFormData({
       title: '', description: '', reward: 10, type: 'daily', action: '',
-      status: 'active', deadline: '', maxCompletions: '', requirements: '', isActive: true
+      status: 'active', deadline: '', maxCompletions: '', requirements: '', 
+      url: '',  // ✅ ДОБАВЛЕНО
+      isActive: true
     });
     setShowForm(false);
     setEditingTask(null);
@@ -247,6 +284,17 @@ const TaskAdminPage = () => {
                     value={formData.requirements}
                     onChange={(e) => setFormData({...formData, requirements: e.target.value})}
                     placeholder='{"minLevel": 1, "completedTasks": []}'
+                  />
+                </div>
+
+                {/* ✅ ДОБАВЛЕНО ПОЛЕ URL: */}
+                <div>
+                  <Label>URL (для переходов)</Label>
+                  <Input 
+                    type="url"
+                    value={formData.url || ''}
+                    onChange={(e) => setFormData({...formData, url: e.target.value})}
+                    placeholder="https://t.me/channel или любая ссылка"
                   />
                 </div>
 

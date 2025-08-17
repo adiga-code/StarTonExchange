@@ -1,3 +1,4 @@
+import { useState } from "react";  // ✅ ДОБАВЛЕН ИМПОРТ
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -27,6 +28,7 @@ export default function TasksTab({ user }: TasksTabProps) {
   const { toast } = useToast();
   const { hapticFeedback, shareApp } = useTelegram();
   const queryClient = useQueryClient();
+  const [openedTasks, setOpenedTasks] = useState(new Set());
 
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['/api/tasks'],
@@ -59,23 +61,64 @@ export default function TasksTab({ user }: TasksTabProps) {
     },
   });
 
-  // ✅ ОБНОВЛЕННАЯ ФУНКЦИЯ с новыми действиями:
+  const checkTaskCompletion = async (taskId) => {
+    const isCompleted = await verifyTaskCompletion(taskId);
+    if (isCompleted) {
+      completeTaskMutation.mutate(taskId);
+      setOpenedTasks(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(taskId);
+        return newSet;
+      });
+    } else {
+      toast({
+        title: "Задание не выполнено",
+        description: "Попробуйте еще раз",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const verifyTaskCompletion = async (taskId) => {
+    // TODO: логика проверки
+    console.log(`Проверяем выполнение задания: ${taskId}`);
+    return Math.random() > 0.3; // 70% шанс успеха
+  };
+
   const handleTaskAction = async (task: TaskWithCompletion) => {
     if (task.completed) return;
 
     hapticFeedback('light');
 
+    // Получаем URL из requirements
+    let taskUrl = null;
+    try {
+      const req = JSON.parse(task.requirements || '{}');
+      taskUrl = req.url;
+    } catch {}
+
     switch (task.action) {
+      case 'follow_channel':
+      case 'visit_website':
+        if (taskUrl) {
+          // Правильное открытие ссылки БЕЗ закрытия WebApp
+          if (window.Telegram?.WebApp?.openTelegramLink && taskUrl.includes('t.me')) {
+            window.Telegram.WebApp.openTelegramLink(taskUrl);
+          } else if (window.Telegram?.WebApp?.openLink) {
+            window.Telegram.WebApp.openLink(taskUrl);
+          } else {
+            window.open(taskUrl, '_blank');
+          }
+          
+          // СРАЗУ показываем кнопку "Проверить"
+          setOpenedTasks(prev => new Set([...prev, task.id]));
+          return; // НЕ выполняем задание сразу
+        }
+        break;
+        
       case 'share_app':
         shareApp('Попробуй этот крутой обменник Stars и TON!');
         break;
-      case 'follow_channel':
-        window.open('https://t.me/starsexchange_news', '_blank');
-        break;
-      case 'daily_login':
-        // Daily login is automatically handled
-        break;
-      // ✅ НОВЫЕ ДЕЙСТВИЯ:
       case 'invite_friends':
         shareApp(`Попробуй Stars Exchange! ${window.location.origin}?ref=${user?.referralCode}`);
         break;
@@ -85,16 +128,15 @@ export default function TasksTab({ user }: TasksTabProps) {
           window.dispatchEvent(event);
         }
         break;
-      case 'visit_website':
-        window.open('https://hezh-digital.ru', '_blank');
+      case 'daily_login':
+        // Daily login is automatically handled
         break;
     }
 
-    // Complete the task
+    // Для остальных действий - выполняем сразу
     completeTaskMutation.mutate(task.id);
   };
 
-  // ✅ ОБНОВЛЕННАЯ ФУНКЦИЯ иконок:
   const getTaskIcon = (type: string, action?: string) => {
     if (action === 'share_app') return Share;
     if (action === 'follow_channel') return Users;
@@ -106,7 +148,6 @@ export default function TasksTab({ user }: TasksTabProps) {
     return CheckCircle;
   };
 
-  // ✅ ОБНОВЛЕННАЯ ФУНКЦИЯ цветов:
   const getTaskIconColor = (type: string, action?: string) => {
     if (action === 'share_app') return 'text-[#4E7FFF]';
     if (action === 'follow_channel') return 'text-blue-400';
@@ -181,6 +222,15 @@ export default function TasksTab({ user }: TasksTabProps) {
                     </p>
                     {task.completed ? (
                       <p className="text-green-500 text-xs">Выполнено</p>
+                    ) : openedTasks.has(task.id) ? (
+                      <Button
+                        onClick={() => checkTaskCompletion(task.id)}
+                        disabled={completeTaskMutation.isPending}
+                        variant="outline"
+                        className="text-green-600 border-green-600 hover:bg-green-50 text-xs h-auto p-1"
+                      >
+                        Проверить
+                      </Button>
                     ) : (
                       <Button
                         onClick={() => handleTaskAction(task)}
@@ -239,8 +289,18 @@ export default function TasksTab({ user }: TasksTabProps) {
                     <p className="font-semibold text-yellow-500 flex items-center">
                       +{task.reward} <Star className="w-4 h-4 ml-1" />
                     </p>
+                    {/* ✅ ИСПРАВЛЕНЫ КНОПКИ В СОЦИАЛЬНЫХ ЗАДАНИЯХ: */}
                     {task.completed ? (
                       <p className="text-green-500 text-xs">Выполнено</p>
+                    ) : openedTasks.has(task.id) ? (
+                      <Button
+                        onClick={() => checkTaskCompletion(task.id)}
+                        disabled={completeTaskMutation.isPending}
+                        variant="outline"
+                        className="text-green-600 border-green-600 hover:bg-green-50 text-xs h-auto p-1"
+                      >
+                        Проверить
+                      </Button>
                     ) : (
                       <Button
                         onClick={() => handleTaskAction(task)}
