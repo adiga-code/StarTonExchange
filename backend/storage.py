@@ -192,3 +192,47 @@ class Storage:
         )
         await self.db.commit()
         return await self.get_setting(key)
+    
+    async def get_all_tasks_with_stats(self):
+        """Получить все задания со статистикой"""
+        result = await self.db.execute(
+            select(Task).order_by(Task.created_at.desc())
+        )
+        tasks = result.scalars().all()
+        
+        # Добавляем статистику выполнений
+        for task in tasks:
+            completed_count = await self.db.execute(
+                select(func.count(UserTask.id)).where(
+                    UserTask.task_id == task.id,
+                    UserTask.completed == True
+                )
+            )
+            task.completed_count = completed_count.scalar() or 0
+            
+        return tasks
+    
+    async def create_task(self, task_data: dict):
+        """Создать новое задание"""
+        task = Task(**task_data)
+        self.db.add(task)
+        await self.db.commit()
+        await self.db.refresh(task)
+        return task
+    
+    async def update_task(self, task_id: str, updates: dict):
+        """Обновить задание"""
+        await self.db.execute(
+            update(Task).where(Task.id == task_id).values(**updates)
+        )
+        await self.db.commit()
+        return await self.get_task(task_id)
+
+    async def increment_task_completion_count(self, task_id: str):
+        """Увеличить счетчик выполнений задания"""
+        await self.db.execute(
+            update(Task)
+            .where(Task.id == task_id)
+            .values(completed_count=Task.completed_count + 1)
+        )
+        await self.db.commit()

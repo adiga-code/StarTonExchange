@@ -299,22 +299,43 @@ async def complete_task(
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         
-        # Check if task already completed
+        # Проверяем статус задания
+        if task.status != "active" or not task.is_active:
+            raise HTTPException(status_code=400, detail="Task is not available")
+            
+        # Проверяем дедлайн
+        if task.deadline and datetime.now() > task.deadline:
+            raise HTTPException(status_code=400, detail="Task deadline passed")
+            
+        # Проверяем максимум выполнений
+        if task.max_completions and task.completed_count >= task.max_completions:
+            raise HTTPException(status_code=400, detail="Task completion limit reached")
+
+        # Проверяем уже выполненное задание
         existing_user_task = await storage.get_user_task(current_user.id, task_id)
         if existing_user_task and existing_user_task.completed:
             raise HTTPException(status_code=400, detail="Task already completed")
         
-        # Create user task if it doesn't exist
+        # Проверяем требования (если есть)
+        if task.requirements:
+            requirements_met = await check_task_requirements(current_user, task.requirements, storage)
+            if not requirements_met:
+                raise HTTPException(status_code=400, detail="Requirements not met")
+        
+        # Заглушка проверки выполнения действия
+        action_verified = await verify_task_action(task.action, current_user)
+        if not action_verified:
+            raise HTTPException(status_code=400, detail="Action not verified")
+        
+        # Создаем user_task если не существует
         if not existing_user_task:
             user_task_data = UserTaskCreate(user_id=current_user.id, task_id=task_id)
             await storage.create_user_task(user_task_data)
         
-        # Complete the task
+        # Выполняем задание
         completed_task = await storage.complete_user_task(current_user.id, task_id)
-        if not completed_task:
-            raise HTTPException(status_code=500, detail="Failed to complete task")
         
-        # Reward user
+        # Начисляем награду
         updates = {
             "stars_balance": current_user.stars_balance + task.reward,
             "total_stars_earned": current_user.total_stars_earned + task.reward,
@@ -323,7 +344,10 @@ async def complete_task(
         }
         await storage.update_user(current_user.id, updates)
         
-        # Create reward transaction
+        # Увеличиваем счетчик выполнений задания
+        await storage.increment_task_completion_count(task_id)
+        
+        # Создаем транзакцию награды
         transaction_data = TransactionCreate(
             user_id=current_user.id,
             type="task_reward",
@@ -335,11 +359,52 @@ async def complete_task(
         await storage.create_transaction(transaction_data)
         
         return {"success": True, "reward": task.reward}
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error completing task: {e}")
         raise HTTPException(status_code=500, detail="Failed to complete task")
+
+# Заглушки для проверки
+async def verify_task_action(action: str, user: User) -> bool:
+    """Заглушка проверки выполнения действия"""
+    # TODO: реализовать проверки для каждого типа действия
+    action_handlers = {
+        'daily_login': lambda: True,
+        'share_app': lambda: True,
+        'follow_channel': lambda: True,
+        'invite_friends': lambda: True,
+        'complete_purchase': lambda: True,
+        'visit_website': lambda: True,
+    }
+    
+    handler = action_handlers.get(action)
+    return handler() if handler else True
+
+async def check_task_requirements(user: User, requirements_json: str, storage: Storage) -> bool:
+    """Проверка требований для выполнения задания"""
+    try:
+        if not requirements_json:
+            return True
+            
+        requirements = json.loads(requirements_json)
+        
+        # Проверка минимального уровня (по количеству выполненных заданий)
+        if 'minLevel' in requirements:
+            if user.tasks_completed < requirements['minLevel']:
+                return False
+                
+        # Проверка выполненных заданий
+        if 'completedTasks' in requirements:
+            for required_task_id in requirements['completedTasks']:
+                user_task = await storage.get_user_task(user.id, required_task_id)
+                if not user_task or not user_task.completed:
+                    return False
+                    
+        return True
+    except json.JSONDecodeError:
+        return True  # Если JSON невалидный, разрешаем выполнение
 
 # Referral routes
 @app.get("/api/referrals/stats", response_model=ReferralStats)
@@ -557,6 +622,99 @@ async def update_admin_settings(
     except Exception as e:
         logger.error(f"Error updating settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to update settings")
+
+
+def verify_task_admin(token: str) -> bool:
+    """Проверка токена администратора заданий из .env"""
+    admin_tokens = os.getenv('ADMIN_TOKENS', '').split(',')
+    admin_tokens = [t.strip() for t in admin_tokens if t.strip()]  # Убираем пробелы
+    return token in admin_tokens
+
+# НОВЫЕ ENDPOINTS для админки заданий:
+
+@app.post("/api/admin/tasks/create")
+async def create_task_admin(
+    task_data: dict,
+    token: str,
+    storage: Storage = Depends(get_storage)
+):
+    """Создание нового задания администратором"""
+    if not verify_task_admin(token):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    try:
+        # Заглушка для проверки выполнения
+        def verify_task_completion():
+            return True
+        
+        new_task = await storage.create_task({
+            "title": task_data["title"],
+            "description": task_data["description"], 
+            "reward": task_data["reward"],
+            "type": task_data["type"],
+            "action": task_data.get("action"),
+            "status": task_data.get("status", "active"),
+            "deadline": task_data.get("deadline"),
+            "max_completions": task_data.get("maxCompletions"),
+            "requirements": task_data.get("requirements"),
+            "is_active": task_data.get("isActive", True)
+        })
+        
+        # Уведомляем пользователей о новом задании
+        if new_task.status == "active":
+            await notify_users_new_task(new_task)
+        
+        return {"success": True, "task": new_task}
+    except Exception as e:
+        logger.error(f"Error creating task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create task")
+
+@app.get("/api/admin/tasks/list")
+async def list_tasks_admin(
+    token: str,
+    storage: Storage = Depends(get_storage)
+):
+    """Получение списка всех заданий для админки"""
+    if not verify_task_admin(token):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    tasks = await storage.get_all_tasks_with_stats()
+    return tasks
+
+@app.put("/api/admin/tasks/{task_id}")
+async def update_task_admin(
+    task_id: str,
+    task_data: dict,
+    token: str,
+    storage: Storage = Depends(get_storage)
+):
+    """Обновление задания"""
+    if not verify_task_admin(token):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    updated_task = await storage.update_task(task_id, task_data)
+    return {"success": True, "task": updated_task}
+
+@app.delete("/api/admin/tasks/{task_id}")
+async def delete_task_admin(
+    task_id: str,
+    token: str,
+    storage: Storage = Depends(get_storage)
+):
+    """Архивация задания"""
+    if not verify_task_admin(token):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    await storage.update_task(task_id, {"status": "expired", "is_active": False})
+    return {"success": True}
+
+# Функция уведомлений (заглушка)
+async def notify_users_new_task(task):
+    """Уведомление пользователей о новом задании"""
+    # TODO: реализовать уведомления через Telegram бота
+    logger.info(f"New task created: {task.title}")
+    pass
+
 
 # Static files for production
 if not os.getenv("DEVELOPMENT"):

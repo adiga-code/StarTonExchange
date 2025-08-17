@@ -1030,22 +1030,43 @@ async def complete_task(
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         
-        # Check if task already completed
+        # Проверяем статус задания
+        if task.status != "active" or not task.is_active:
+            raise HTTPException(status_code=400, detail="Task is not available")
+            
+        # Проверяем дедлайн
+        if task.deadline and datetime.now() > task.deadline:
+            raise HTTPException(status_code=400, detail="Task deadline passed")
+            
+        # Проверяем максимум выполнений
+        if task.max_completions and task.completed_count >= task.max_completions:
+            raise HTTPException(status_code=400, detail="Task completion limit reached")
+
+        # Проверяем уже выполненное задание
         existing_user_task = await storage.get_user_task(current_user.id, task_id)
         if existing_user_task and existing_user_task.completed:
             raise HTTPException(status_code=400, detail="Task already completed")
         
-        # Create user task if it doesn't exist
+        # Проверяем требования (если есть)
+        if task.requirements:
+            requirements_met = await check_task_requirements(current_user, task.requirements, storage)
+            if not requirements_met:
+                raise HTTPException(status_code=400, detail="Requirements not met")
+        
+        # Заглушка проверки выполнения действия
+        action_verified = await verify_task_action(task.action, current_user)
+        if not action_verified:
+            raise HTTPException(status_code=400, detail="Action not verified")
+        
+        # Создаем user_task если не существует
         if not existing_user_task:
             user_task_data = UserTaskCreate(user_id=current_user.id, task_id=task_id)
             await storage.create_user_task(user_task_data)
         
-        # Complete the task
+        # Выполняем задание
         completed_task = await storage.complete_user_task(current_user.id, task_id)
-        if not completed_task:
-            raise HTTPException(status_code=500, detail="Failed to complete task")
         
-        # Reward user
+        # Начисляем награду
         updates = {
             "stars_balance": current_user.stars_balance + task.reward,
             "total_stars_earned": current_user.total_stars_earned + task.reward,
@@ -1054,7 +1075,10 @@ async def complete_task(
         }
         await storage.update_user(current_user.id, updates)
         
-        # Create reward transaction
+        # Увеличиваем счетчик выполнений задания
+        await storage.increment_task_completion_count(task_id)
+        
+        # Создаем транзакцию награды
         transaction_data = TransactionCreate(
             user_id=current_user.id,
             type="task_reward",
@@ -1066,11 +1090,52 @@ async def complete_task(
         await storage.create_transaction(transaction_data)
         
         return {"success": True, "reward": task.reward}
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error completing task: {e}")
         raise HTTPException(status_code=500, detail="Failed to complete task")
+
+# Заглушки для проверки
+async def verify_task_action(action: str, user: User) -> bool:
+    """Заглушка проверки выполнения действия"""
+    # TODO: реализовать проверки для каждого типа действия
+    action_handlers = {
+        'daily_login': lambda: True,
+        'share_app': lambda: True,
+        'follow_channel': lambda: True,
+        'invite_friends': lambda: True,
+        'complete_purchase': lambda: True,
+        'visit_website': lambda: True,
+    }
+    
+    handler = action_handlers.get(action)
+    return handler() if handler else True
+
+async def check_task_requirements(user: User, requirements_json: str, storage: Storage) -> bool:
+    """Проверка требований для выполнения задания"""
+    try:
+        if not requirements_json:
+            return True
+            
+        requirements = json.loads(requirements_json)
+        
+        # Проверка минимального уровня (по количеству выполненных заданий)
+        if 'minLevel' in requirements:
+            if user.tasks_completed < requirements['minLevel']:
+                return False
+                
+        # Проверка выполненных заданий
+        if 'completedTasks' in requirements:
+            for required_task_id in requirements['completedTasks']:
+                user_task = await storage.get_user_task(user.id, required_task_id)
+                if not user_task or not user_task.completed:
+                    return False
+                    
+        return True
+    except json.JSONDecodeError:
+        return True  # Если JSON невалидный, разрешаем выполнение
 
 # Referral routes
 @app.get("/api/referrals/stats", response_model=ReferralStats)
@@ -1288,6 +1353,99 @@ async def update_admin_settings(
     except Exception as e:
         logger.error(f"Error updating settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to update settings")
+
+
+def verify_task_admin(token: str) -> bool:
+    """Проверка токена администратора заданий из .env"""
+    admin_tokens = os.getenv('ADMIN_TOKENS', '').split(',')
+    admin_tokens = [t.strip() for t in admin_tokens if t.strip()]  # Убираем пробелы
+    return token in admin_tokens
+
+# НОВЫЕ ENDPOINTS для админки заданий:
+
+@app.post("/api/admin/tasks/create")
+async def create_task_admin(
+    task_data: dict,
+    token: str,
+    storage: Storage = Depends(get_storage)
+):
+    """Создание нового задания администратором"""
+    if not verify_task_admin(token):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    try:
+        # Заглушка для проверки выполнения
+        def verify_task_completion():
+            return True
+        
+        new_task = await storage.create_task({
+            "title": task_data["title"],
+            "description": task_data["description"], 
+            "reward": task_data["reward"],
+            "type": task_data["type"],
+            "action": task_data.get("action"),
+            "status": task_data.get("status", "active"),
+            "deadline": task_data.get("deadline"),
+            "max_completions": task_data.get("maxCompletions"),
+            "requirements": task_data.get("requirements"),
+            "is_active": task_data.get("isActive", True)
+        })
+        
+        # Уведомляем пользователей о новом задании
+        if new_task.status == "active":
+            await notify_users_new_task(new_task)
+        
+        return {"success": True, "task": new_task}
+    except Exception as e:
+        logger.error(f"Error creating task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create task")
+
+@app.get("/api/admin/tasks/list")
+async def list_tasks_admin(
+    token: str,
+    storage: Storage = Depends(get_storage)
+):
+    """Получение списка всех заданий для админки"""
+    if not verify_task_admin(token):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    tasks = await storage.get_all_tasks_with_stats()
+    return tasks
+
+@app.put("/api/admin/tasks/{task_id}")
+async def update_task_admin(
+    task_id: str,
+    task_data: dict,
+    token: str,
+    storage: Storage = Depends(get_storage)
+):
+    """Обновление задания"""
+    if not verify_task_admin(token):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    updated_task = await storage.update_task(task_id, task_data)
+    return {"success": True, "task": updated_task}
+
+@app.delete("/api/admin/tasks/{task_id}")
+async def delete_task_admin(
+    task_id: str,
+    token: str,
+    storage: Storage = Depends(get_storage)
+):
+    """Архивация задания"""
+    if not verify_task_admin(token):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    await storage.update_task(task_id, {"status": "expired", "is_active": False})
+    return {"success": True}
+
+# Функция уведомлений (заглушка)
+async def notify_users_new_task(task):
+    """Уведомление пользователей о новом задании"""
+    # TODO: реализовать уведомления через Telegram бота
+    logger.info(f"New task created: {task.title}")
+    pass
+
 
 # Static files for production
 if not os.getenv("DEVELOPMENT"):
@@ -1984,6 +2142,50 @@ class Storage:
         )
         await self.db.commit()
         return await self.get_setting(key)
+    
+    async def get_all_tasks_with_stats(self):
+        """Получить все задания со статистикой"""
+        result = await self.db.execute(
+            select(Task).order_by(Task.created_at.desc())
+        )
+        tasks = result.scalars().all()
+        
+        # Добавляем статистику выполнений
+        for task in tasks:
+            completed_count = await self.db.execute(
+                select(func.count(UserTask.id)).where(
+                    UserTask.task_id == task.id,
+                    UserTask.completed == True
+                )
+            )
+            task.completed_count = completed_count.scalar() or 0
+            
+        return tasks
+    
+    async def create_task(self, task_data: dict):
+        """Создать новое задание"""
+        task = Task(**task_data)
+        self.db.add(task)
+        await self.db.commit()
+        await self.db.refresh(task)
+        return task
+    
+    async def update_task(self, task_id: str, updates: dict):
+        """Обновить задание"""
+        await self.db.execute(
+            update(Task).where(Task.id == task_id).values(**updates)
+        )
+        await self.db.commit()
+        return await self.get_task(task_id)
+
+    async def increment_task_completion_count(self, task_id: str):
+        """Увеличить счетчик выполнений задания"""
+        await self.db.execute(
+            update(Task)
+            .where(Task.id == task_id)
+            .values(completed_count=Task.completed_count + 1)
+        )
+        await self.db.commit()
 
 ================================================================================
 FILE: backend\telegram_auth.py
@@ -2893,8 +3095,16 @@ export const tasks = pgTable("tasks", {
   description: text("description").notNull(),
   reward: integer("reward").notNull(),
   type: varchar("type").notNull(), // 'daily', 'social', 'referral'
-  action: varchar("action"), // 'daily_login', 'share_app', 'follow_channel'
+  action: varchar("action"), // + новые: 'invite_friends', 'complete_purchase', 'visit_website'
   isActive: boolean("is_active").default(true),
+  
+  // НОВЫЕ ПОЛЯ:
+  status: varchar("status").default("active"), // 'draft', 'active', 'paused', 'expired'
+  deadline: timestamp("deadline"), // срок выполнения (опционально)
+  maxCompletions: integer("max_completions"), // максимум выполнений (опционально)
+  requirements: text("requirements"), // требования в JSON формате (опционально)
+  completedCount: integer("completed_count").default(0), // счетчик выполнений
+  
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2964,12 +3174,14 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/pages/home";
 import AdminPage from "@/pages/admin";
 import NotFound from "@/pages/not-found";
+import TaskAdminPage from "@/components/task-admin-page";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/admin" component={AdminPage} />
+      <Route path="/edittasks" component={TaskAdminPage} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -4377,6 +4589,338 @@ export default function ProfileTab({ user }: ProfileTabProps) {
 }
 
 ================================================================================
+FILE: frontend\src\components\task-admin-page.tsx
+================================================================================
+
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Plus, Edit, Trash2, Eye } from 'lucide-react';
+
+const TaskAdminPage = () => {
+  const [token, setToken] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [tasks, setTasks] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    reward: 10,
+    type: 'daily',
+    action: '',
+    status: 'active',
+    deadline: '',
+    maxCompletions: '',
+    requirements: '',
+    isActive: true
+  });
+
+  // Проверка токена из URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlToken = urlParams.get('token') || window.location.pathname.split('/admin')[1];
+    if (urlToken) {
+      setToken(urlToken);
+      checkAuth(urlToken);
+    }
+  }, []);
+
+  const checkAuth = async (authToken) => {
+    try {
+      const response = await fetch(`/api/admin/tasks/list?token=${authToken}`);
+      if (response.ok) {
+        setIsAuthenticated(true);
+        loadTasks(authToken);
+      }
+    } catch (error) {
+      console.error('Auth failed:', error);
+    }
+  };
+
+  const loadTasks = async (authToken) => {
+    try {
+      const response = await fetch(`/api/admin/tasks/list?token=${authToken}`);
+      const data = await response.json();
+      setTasks(data);
+    } catch (error) {
+      console.error('Failed to load tasks:', error);
+    }
+  };
+
+  const handleSubmit = async () => {
+    
+    try {
+      const url = editingTask 
+        ? `/api/admin/tasks/${editingTask.id}` 
+        : '/api/admin/tasks/create';
+      
+      const method = editingTask ? 'PUT' : 'POST';
+      
+      const response = await fetch(`${url}?token=${token}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+
+      if (response.ok) {
+        resetForm();
+        loadTasks(token);
+        alert(editingTask ? 'Задание обновлено!' : 'Задание создано!');
+      }
+    } catch (error) {
+      alert('Ошибка: ' + error.message);
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      title: '', description: '', reward: 10, type: 'daily', action: '',
+      status: 'active', deadline: '', maxCompletions: '', requirements: '', isActive: true
+    });
+    setShowForm(false);
+    setEditingTask(null);
+  };
+
+  const editTask = (task) => {
+    setFormData(task);
+    setEditingTask(task);
+    setShowForm(true);
+  };
+
+  const deleteTask = async (taskId) => {
+    if (confirm('Архивировать задание?')) {
+      try {
+        await fetch(`/api/admin/tasks/${taskId}?token=${token}`, { method: 'DELETE' });
+        loadTasks(token);
+        alert('Задание архивировано!');
+      } catch (error) {
+        alert('Ошибка удаления');
+      }
+    }
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="w-96">
+          <CardHeader>
+            <CardTitle>Доступ запрещен</CardTitle>
+            <CardDescription>Неверный токен доступа</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-3xl font-bold">Админка заданий</h1>
+          <Button onClick={() => setShowForm(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Новое задание
+          </Button>
+        </div>
+
+        {/* Форма создания/редактирования */}
+        {showForm && (
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle>{editingTask ? 'Редактировать задание' : 'Новое задание'}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Название</Label>
+                    <Input 
+                      value={formData.title}
+                      onChange={(e) => setFormData({...formData, title: e.target.value})}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label>Награда (звезды)</Label>
+                    <Input 
+                      type="number"
+                      value={formData.reward}
+                      onChange={(e) => setFormData({...formData, reward: parseInt(e.target.value)})}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Описание</Label>
+                  <Textarea 
+                    value={formData.description}
+                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                    maxLength={200}
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <Label>Тип</Label>
+                    <Select value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Ежедневное</SelectItem>
+                        <SelectItem value="social">Социальное</SelectItem>
+                        <SelectItem value="referral">Реферальное</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label>Действие</Label>
+                    <Select value={formData.action} onValueChange={(value) => setFormData({...formData, action: value})}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Выберите действие" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily_login">Ежедневный вход</SelectItem>
+                        <SelectItem value="share_app">Поделиться приложением</SelectItem>
+                        <SelectItem value="follow_channel">Подписаться на канал</SelectItem>
+                        <SelectItem value="invite_friends">Пригласить друзей</SelectItem>
+                        <SelectItem value="complete_purchase">Совершить покупку</SelectItem>
+                        <SelectItem value="visit_website">Посетить сайт</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label>Статус</Label>
+                    <Select value={formData.status} onValueChange={(value) => setFormData({...formData, status: value})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="draft">Черновик</SelectItem>
+                        <SelectItem value="active">Активное</SelectItem>
+                        <SelectItem value="paused">Приостановлено</SelectItem>
+                        <SelectItem value="expired">Истекло</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Дедлайн (опционально)</Label>
+                    <Input 
+                      type="datetime-local"
+                      value={formData.deadline}
+                      onChange={(e) => setFormData({...formData, deadline: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <Label>Макс. выполнений (опционально)</Label>
+                    <Input 
+                      type="number"
+                      value={formData.maxCompletions}
+                      onChange={(e) => setFormData({...formData, maxCompletions: e.target.value})}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Требования (JSON, опционально)</Label>
+                  <Textarea 
+                    value={formData.requirements}
+                    onChange={(e) => setFormData({...formData, requirements: e.target.value})}
+                    placeholder='{"minLevel": 1, "completedTasks": []}'
+                  />
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch 
+                    checked={formData.isActive}
+                    onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
+                  />
+                  <Label>Активное</Label>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button onClick={handleSubmit}>{editingTask ? 'Обновить' : 'Создать'}</Button>
+                  <Button variant="outline" onClick={resetForm}>Отмена</Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Список заданий */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Список заданий ({tasks.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-2">Название</th>
+                    <th className="text-left p-2">Тип</th>
+                    <th className="text-left p-2">Награда</th>
+                    <th className="text-left p-2">Статус</th>
+                    <th className="text-left p-2">Выполнено</th>
+                    <th className="text-left p-2">Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tasks.map(task => (
+                    <tr key={task.id} className="border-b hover:bg-gray-50">
+                      <td className="p-2 font-medium">{task.title}</td>
+                      <td className="p-2">{task.type}</td>
+                      <td className="p-2">{task.reward} ⭐</td>
+                      <td className="p-2">
+                        <span className={`px-2 py-1 rounded text-xs ${
+                          task.status === 'active' ? 'bg-green-100 text-green-800' :
+                          task.status === 'draft' ? 'bg-gray-100 text-gray-800' :
+                          task.status === 'paused' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {task.status}
+                        </span>
+                      </td>
+                      <td className="p-2">{task.completedCount || 0}</td>
+                      <td className="p-2">
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="outline" onClick={() => editTask(task)}>
+                            <Edit className="w-3 h-3" />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => deleteTask(task.id)}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+export default TaskAdminPage;
+
+================================================================================
 FILE: frontend\src\components\tasks-tab.tsx
 ================================================================================
 
@@ -4385,7 +4929,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useTelegram } from "@/hooks/use-telegram";
-import { CalendarDays, ThumbsUp, CheckCircle, Share, Users, Star } from "lucide-react";
+import { CalendarDays, ThumbsUp, CheckCircle, Share, Users, Star, ShoppingCart, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { SnakeCaseUser, User } from "@shared/schema";
@@ -4456,6 +5000,21 @@ export default function TasksTab({ user }: TasksTabProps) {
       case 'daily_login':
         // Daily login is automatically handled
         break;
+      case 'invite_friends':
+        // Открыть реферальную ссылку или показать инвайт
+        shareApp(`Попробуй Stars Exchange! ${window.location.origin}?ref=${user?.referralCode}`);
+        break;
+      case 'complete_purchase':
+        // Перенаправить на вкладку покупок
+        if (typeof window !== 'undefined') {
+          const event = new CustomEvent('switchTab', { detail: 'buy' });
+          window.dispatchEvent(event);
+        }
+        break;
+      case 'visit_website':
+        // Открыть внешний сайт
+        window.open('https://hezh-digital.ru', '_blank');
+        break;
     }
 
     // Complete the task
@@ -4465,6 +5024,9 @@ export default function TasksTab({ user }: TasksTabProps) {
   const getTaskIcon = (type: string, action?: string) => {
     if (action === 'share_app') return Share;
     if (action === 'follow_channel') return Users;
+    if (action === 'invite_friends') return Users;
+    if (action === 'complete_purchase') return ShoppingCart;
+    if (action === 'visit_website') return ExternalLink;
     if (type === 'daily') return CalendarDays;
     if (type === 'social') return ThumbsUp;
     return CheckCircle;
@@ -4473,6 +5035,9 @@ export default function TasksTab({ user }: TasksTabProps) {
   const getTaskIconColor = (type: string, action?: string) => {
     if (action === 'share_app') return 'text-[#4E7FFF]';
     if (action === 'follow_channel') return 'text-blue-400';
+    if (action === 'invite_friends') return 'text-green-500';
+    if (action === 'complete_purchase') return 'text-purple-500';
+    if (action === 'visit_website') return 'text-orange-500';
     if (type === 'daily') return 'text-yellow-500';
     if (type === 'social') return 'text-[#4E7FFF]';
     return 'text-green-500';
@@ -4636,7 +5201,7 @@ export default function TasksTab({ user }: TasksTabProps) {
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">Заработано сегодня</span>
             <span className="font-semibold text-yellow-500 flex items-center">
-              +{user?.daily_earnings || 0} <Star className="w-4 h-4 ml-1" />
+              +{user?.dailyEarnings || 0} <Star className="w-4 h-4 ml-1" />
             </span>
           </div>
         </div>
@@ -4644,7 +5209,6 @@ export default function TasksTab({ user }: TasksTabProps) {
     </div>
   );
 }
-
 
 ================================================================================
 FILE: frontend\src\components\telegram-app.tsx
@@ -4678,7 +5242,6 @@ export default function TelegramApp() {
   const { theme, toggleTheme, isDark } = useTheme();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const userAvatar = useUserAvatar(currentUser?.username);
 
   // Initialize user
   const createUserMutation = useMutation({
@@ -4700,6 +5263,7 @@ export default function TelegramApp() {
     },
     enabled: !!user,
   });
+  const userAvatar = useUserAvatar(currentUser?.username);
 
   useEffect(() => {
     if (user && !currentUser && !userLoading) {
@@ -10016,6 +10580,80 @@ export function useIsMobile() {
   return !!isMobile
 }
 
+
+================================================================================
+FILE: frontend\src\hooks\use-preload-avatar.ts
+================================================================================
+
+// frontend/src/hooks/use-preload-avatar.ts
+import { useState, useEffect } from 'react';
+import type { SnakeCaseUser } from "../../shared/schema";
+
+interface AvatarData {
+  photo_url: string;
+  first_name: string;
+}
+
+interface UsePreloadAvatarResult {
+  avatar: AvatarData | null;
+  isLoading: boolean;
+  error: string | null;
+}
+
+// Кеш для хранения фото в памяти во время сессии
+const avatarCache = new Map<string, AvatarData>();
+
+export function usePreloadAvatar(user?: SnakeCaseUser | null): UsePreloadAvatarResult {
+  const [avatar, setAvatar] = useState<AvatarData | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.username?.trim()) {
+      setAvatar(null);
+      setIsLoading(false);
+      return;
+    }
+
+    const username = user.username.trim();
+    
+    // Проверяем кеш
+    if (avatarCache.has(username)) {
+      setAvatar(avatarCache.get(username)!);
+      setIsLoading(false);
+      return;
+    }
+
+    // Загружаем фото
+    const fetchAvatar = async () => {
+      setIsLoading(true);
+      setError(null);
+      
+      try {
+        const response = await fetch(`/api/getPhoto?username=${username}`);
+        const data = await response.json();
+        
+        if (data.success) {
+          // Сохраняем в кеш
+          avatarCache.set(username, data);
+          setAvatar(data);
+        } else {
+          setError(data.error || 'Failed to load avatar');
+          setAvatar(null);
+        }
+      } catch (e) {
+        setError('Network error');
+        setAvatar(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchAvatar();
+  }, [user?.username]);
+
+  return { avatar, isLoading, error };
+}
 
 ================================================================================
 FILE: frontend\src\hooks\use-telegram.ts

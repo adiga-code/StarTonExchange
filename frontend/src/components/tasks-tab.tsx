@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useTelegram } from "@/hooks/use-telegram";
-import { CalendarDays, ThumbsUp, CheckCircle, Share, Users, Star } from "lucide-react";
+import { CalendarDays, ThumbsUp, CheckCircle, Share, Users, Star, ShoppingCart, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { SnakeCaseUser, User } from "@shared/schema";
@@ -59,6 +59,7 @@ export default function TasksTab({ user }: TasksTabProps) {
     },
   });
 
+  // ✅ ОБНОВЛЕННАЯ ФУНКЦИЯ с новыми действиями:
   const handleTaskAction = async (task: TaskWithCompletion) => {
     if (task.completed) return;
 
@@ -74,23 +75,44 @@ export default function TasksTab({ user }: TasksTabProps) {
       case 'daily_login':
         // Daily login is automatically handled
         break;
+      // ✅ НОВЫЕ ДЕЙСТВИЯ:
+      case 'invite_friends':
+        shareApp(`Попробуй Stars Exchange! ${window.location.origin}?ref=${user?.referralCode}`);
+        break;
+      case 'complete_purchase':
+        if (typeof window !== 'undefined') {
+          const event = new CustomEvent('switchTab', { detail: 'buy' });
+          window.dispatchEvent(event);
+        }
+        break;
+      case 'visit_website':
+        window.open('https://hezh-digital.ru', '_blank');
+        break;
     }
 
     // Complete the task
     completeTaskMutation.mutate(task.id);
   };
 
+  // ✅ ОБНОВЛЕННАЯ ФУНКЦИЯ иконок:
   const getTaskIcon = (type: string, action?: string) => {
     if (action === 'share_app') return Share;
     if (action === 'follow_channel') return Users;
+    if (action === 'invite_friends') return Users;
+    if (action === 'complete_purchase') return ShoppingCart;
+    if (action === 'visit_website') return ExternalLink;
     if (type === 'daily') return CalendarDays;
     if (type === 'social') return ThumbsUp;
     return CheckCircle;
   };
 
+  // ✅ ОБНОВЛЕННАЯ ФУНКЦИЯ цветов:
   const getTaskIconColor = (type: string, action?: string) => {
     if (action === 'share_app') return 'text-[#4E7FFF]';
     if (action === 'follow_channel') return 'text-blue-400';
+    if (action === 'invite_friends') return 'text-green-500';
+    if (action === 'complete_purchase') return 'text-purple-500';
+    if (action === 'visit_website') return 'text-orange-500';
     if (type === 'daily') return 'text-yellow-500';
     if (type === 'social') return 'text-[#4E7FFF]';
     return 'text-green-500';
@@ -254,7 +276,7 @@ export default function TasksTab({ user }: TasksTabProps) {
           <div className="flex justify-between text-sm">
             <span className="text-gray-600 dark:text-gray-400">Заработано сегодня</span>
             <span className="font-semibold text-yellow-500 flex items-center">
-              +{user?.daily_earnings || 0} <Star className="w-4 h-4 ml-1" />
+              +{user?.dailyEarnings || 0} <Star className="w-4 h-4 ml-1" />
             </span>
           </div>
         </div>

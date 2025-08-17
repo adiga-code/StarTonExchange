@@ -44,8 +44,16 @@ export const tasks = pgTable("tasks", {
   description: text("description").notNull(),
   reward: integer("reward").notNull(),
   type: varchar("type").notNull(), // 'daily', 'social', 'referral'
-  action: varchar("action"), // 'daily_login', 'share_app', 'follow_channel'
+  action: varchar("action"), // + новые: 'invite_friends', 'complete_purchase', 'visit_website'
   isActive: boolean("is_active").default(true),
+  
+  // НОВЫЕ ПОЛЯ:
+  status: varchar("status").default("active"), // 'draft', 'active', 'paused', 'expired'
+  deadline: timestamp("deadline"), // срок выполнения (опционально)
+  maxCompletions: integer("max_completions"), // максимум выполнений (опционально)
+  requirements: text("requirements"), // требования в JSON формате (опционально)
+  completedCount: integer("completed_count").default(0), // счетчик выполнений
+  
   createdAt: timestamp("created_at").defaultNow(),
 });
 
