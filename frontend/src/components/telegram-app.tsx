@@ -26,7 +26,6 @@ export default function TelegramApp() {
   const { theme, toggleTheme, isDark } = useTheme();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const userAvatar = useUserAvatar(currentUser?.username);
 
   // Initialize user
   const createUserMutation = useMutation({
@@ -48,6 +47,7 @@ export default function TelegramApp() {
     },
     enabled: !!user,
   });
+  const userAvatar = useUserAvatar(currentUser?.username);
 
   useEffect(() => {
     if (user && !currentUser && !userLoading) {

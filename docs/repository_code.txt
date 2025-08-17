@@ -4057,6 +4057,7 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useTelegram } from "@/hooks/use-telegram";
+import { useUserAvatar } from "@/hooks/use-user-avatar";
 import { useToast } from "@/hooks/use-toast";
 import { Users, Copy, Share, Star, Bell, Palette, Plus, Minus, Wallet, CreditCard, History, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -4073,6 +4074,7 @@ interface ProfileTabProps {
 export default function ProfileTab({ user }: ProfileTabProps) {
   const { toast } = useToast();
   const { hapticFeedback, shareApp } = useTelegram();
+  const userAvatar = useUserAvatar(user?.username);
 
   const { data: referralStats } = useQuery({
     queryKey: ['/api/referrals/stats'],
@@ -4123,12 +4125,20 @@ export default function ProfileTab({ user }: ProfileTabProps) {
         transition={{ duration: 0.3 }}
       >
         <div className="flex items-center space-x-4 mb-4">
-          <motion.div
-            className="w-16 h-16 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center"
-            whileHover={{ scale: 1.05 }}
-          >
-            <span className="text-xl font-bold text-white">{getUserInitials()}</span>
-          </motion.div>
+          {userAvatar?.photo_url ? (
+            <img 
+              src={userAvatar.photo_url} 
+              alt="Avatar" 
+              className="w-16 h-16 rounded-full object-cover"
+            />
+          ) : (
+            <motion.div
+              className="w-16 h-16 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center"
+              whileHover={{ scale: 1.05 }}
+            >
+              <span className="text-xl font-bold text-white">{getUserInitials()}</span>
+            </motion.div>
+          )}
           <div>
             <h3 className="text-xl font-bold">
               {user?.first_name} {user?.last_name}
@@ -4365,7 +4375,6 @@ export default function ProfileTab({ user }: ProfileTabProps) {
     </div>
   );
 }
-
 
 ================================================================================
 FILE: frontend\src\components\tasks-tab.tsx
@@ -4648,6 +4657,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useUserAvatar } from "@/hooks/use-user-avatar";
 import BalanceCard from "./balance-card";
 import BuyTab from "./buy-tab";
 import TasksTab from "./tasks-tab";
@@ -4668,6 +4678,7 @@ export default function TelegramApp() {
   const { theme, toggleTheme, isDark } = useTheme();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const userAvatar = useUserAvatar(currentUser?.username);
 
   // Initialize user
   const createUserMutation = useMutation({
@@ -4756,13 +4767,21 @@ export default function TelegramApp() {
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </motion.button>
-            <motion.div
-              className="w-8 h-8 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center cursor-pointer"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <span className="text-xs font-bold text-white">{getUserInitials()}</span>
-            </motion.div>
+            {userAvatar?.photo_url ? (
+              <img 
+                src={userAvatar.photo_url} 
+                alt="Avatar" 
+                className="w-8 h-8 rounded-full"
+              />
+            ) : (
+              <motion.div
+                className="w-8 h-8 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center cursor-pointer"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <span className="text-xs font-bold text-white">{getUserInitials()}</span>
+              </motion.div>
+            )}
           </div>
         </div>
       </header>
@@ -10293,6 +10312,32 @@ function useToast() {
 
 export { useToast, toast }
 
+
+================================================================================
+FILE: frontend\src\hooks\use-user-avatar.ts
+================================================================================
+
+import { useState, useEffect } from 'react';
+
+export function useUserAvatar(username?: string | null) {
+  const [avatar, setAvatar] = useState<{photo_url: string, first_name: string} | null>(null);
+
+  useEffect(() => {
+    if (!username?.trim()) return;
+
+    const fetchAvatar = async () => {
+      try {
+        const response = await fetch(`/api/getPhoto?username=${username.trim()}`);
+        const data = await response.json();
+        if (data.success) setAvatar(data);
+      } catch (e) {}
+    };
+
+    fetchAvatar();
+  }, [username]);
+
+  return avatar;
+}
 
 ================================================================================
 FILE: frontend\src\lib\queryClient.ts
