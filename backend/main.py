@@ -10,7 +10,8 @@ import httpx
 import logging
 from datetime import datetime, date
 from decimal import Decimal
-from dotenv import load_dotenvimport base64
+from dotenv import load_dotenv
+import base64
 from pyrogram import Client
 from pyrogram.errors import UsernameNotOccupied, UsernameInvalid, FloodWait, AuthKeyUnregistered
 
