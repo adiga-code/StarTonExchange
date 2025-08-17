@@ -108,18 +108,69 @@ class Storage:
         result = await self.db.execute(select(Task).where(Task.is_active == True))
         return result.scalars().all()
 
-    async def create_task(self, task_data: dict) -> Task:
-        task = Task(**task_data)
+    # ОБНОВИТЬ метод create_task в storage.py:
+
+    async def create_task(self, task_data: dict):
+        """Создать новое задание"""
+        # ✅ ФИЛЬТРУЕМ И ОЧИЩАЕМ ДАННЫЕ
+        clean_data = {}
+        
+        # Обязательные поля
+        clean_data["title"] = task_data["title"]
+        clean_data["description"] = task_data["description"]
+        clean_data["reward"] = task_data["reward"]
+        clean_data["type"] = task_data["type"]
+        clean_data["is_active"] = task_data.get("is_active", True)
+        
+        # Опциональные строковые поля
+        if task_data.get("action"):
+            clean_data["action"] = task_data["action"]
+        if task_data.get("status"):
+            clean_data["status"] = task_data["status"]
+        if task_data.get("requirements"):
+            clean_data["requirements"] = task_data["requirements"]
+            
+        # Опциональные специальные поля
+        if task_data.get("deadline") is not None:
+            clean_data["deadline"] = task_data["deadline"]
+        if task_data.get("max_completions") is not None:
+            clean_data["max_completions"] = task_data["max_completions"]
+        if task_data.get("completed_count") is not None:
+            clean_data["completed_count"] = task_data["completed_count"]
+        
+        task = Task(**clean_data)
         self.db.add(task)
         await self.db.commit()
         await self.db.refresh(task)
         return task
 
-    async def update_task(self, task_id: str, updates: dict) -> Optional[Task]:
-        await self.db.execute(
-            update(Task).where(Task.id == task_id).values(**updates)
-        )
-        await self.db.commit()
+    # ТАКЖЕ ОБНОВИТЬ метод update_task:
+    async def update_task(self, task_id: str, updates: dict):
+        """Обновить задание"""
+        # ✅ ФИЛЬТРУЕМ ДАННЫЕ
+        clean_updates = {}
+        
+        # Список разрешенных полей
+        allowed_fields = [
+            'title', 'description', 'reward', 'type', 'action', 
+            'is_active', 'status', 'deadline', 'max_completions', 
+            'requirements', 'completed_count'
+        ]
+        
+        for key, value in updates.items():
+            if key in allowed_fields:
+                # Не добавляем пустые строки для опциональных полей
+                if key in ['deadline', 'max_completions', 'requirements', 'action'] and value == "":
+                    clean_updates[key] = None
+                else:
+                    clean_updates[key] = value
+        
+        if clean_updates:  # Обновляем только если есть валидные поля
+            await self.db.execute(
+                update(Task).where(Task.id == task_id).values(**clean_updates)
+            )
+            await self.db.commit()
+        
         return await self.get_task(task_id)
 
     # UserTask methods

@@ -640,31 +640,53 @@ async def create_task_admin(
         raise HTTPException(status_code=403, detail="Access denied")
     
     try:
-        # Заглушка для проверки выполнения
-        def verify_task_completion():
-            return True
+        # ✅ ПРАВИЛЬНАЯ ОБРАБОТКА ДАННЫХ:
         
+        # Конвертируем пустые строки в None для опциональных полей
+        deadline = task_data.get("deadline")
+        if deadline == "" or deadline is None:
+            deadline = None
+        elif isinstance(deadline, str):
+            try:
+                # Пытаемся распарсить datetime из строки
+                from datetime import datetime
+                deadline = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+            except:
+                deadline = None
+        
+        max_completions = task_data.get("maxCompletions")
+        if max_completions == "" or max_completions is None:
+            max_completions = None
+        else:
+            try:
+                max_completions = int(max_completions)
+            except:
+                max_completions = None
+        
+        requirements = task_data.get("requirements")
+        if requirements == "":
+            requirements = None
+            
+        # Создаем задание с правильными типами данных
         new_task = await storage.create_task({
             "title": task_data["title"],
             "description": task_data["description"], 
-            "reward": task_data["reward"],
+            "reward": int(task_data["reward"]),
             "type": task_data["type"],
-            "action": task_data.get("action"),
+            "action": task_data.get("action") or None,
             "status": task_data.get("status", "active"),
-            "deadline": task_data.get("deadline"),
-            "max_completions": task_data.get("maxCompletions"),
-            "requirements": task_data.get("requirements"),
-            "is_active": task_data.get("isActive", True)
+            "deadline": deadline,  # None или datetime объект
+            "max_completions": max_completions,  # None или int
+            "requirements": requirements,  # None или string
+            "is_active": bool(task_data.get("isActive", True))
         })
         
-        # Уведомляем пользователей о новом задании
-        if new_task.status == "active":
-            await notify_users_new_task(new_task)
-        
+        logger.info(f"New task created: {new_task.title}")
         return {"success": True, "task": new_task}
     except Exception as e:
         logger.error(f"Error creating task: {e}")
         raise HTTPException(status_code=500, detail="Failed to create task")
+
 
 @app.get("/api/admin/tasks/list")
 async def list_tasks_admin(
@@ -689,8 +711,52 @@ async def update_task_admin(
     if not verify_task_admin(token):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    updated_task = await storage.update_task(task_id, task_data)
-    return {"success": True, "task": updated_task}
+    try:
+        # ✅ ПРАВИЛЬНАЯ ОБРАБОТКА ДАННЫХ:
+        
+        # Конвертируем пустые строки в None
+        deadline = task_data.get("deadline")
+        if deadline == "" or deadline is None:
+            deadline = None
+        elif isinstance(deadline, str):
+            try:
+                from datetime import datetime
+                deadline = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+            except:
+                deadline = None
+        
+        max_completions = task_data.get("maxCompletions")
+        if max_completions == "" or max_completions is None:
+            max_completions = None
+        else:
+            try:
+                max_completions = int(max_completions)
+            except:
+                max_completions = None
+        
+        requirements = task_data.get("requirements")
+        if requirements == "":
+            requirements = None
+            
+        # Подготавливаем данные для обновления
+        update_data = {
+            "title": task_data["title"],
+            "description": task_data["description"], 
+            "reward": int(task_data["reward"]),
+            "type": task_data["type"],
+            "action": task_data.get("action") or None,
+            "status": task_data.get("status", "active"),
+            "deadline": deadline,
+            "max_completions": max_completions,
+            "requirements": requirements,
+            "is_active": bool(task_data.get("isActive", True))
+        }
+        
+        updated_task = await storage.update_task(task_id, update_data)
+        return {"success": True, "task": updated_task}
+    except Exception as e:
+        logger.error(f"Error updating task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update task")
 
 @app.delete("/api/admin/tasks/{task_id}")
 async def delete_task_admin(
