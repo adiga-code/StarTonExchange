@@ -20,3 +20,6 @@ pydantic>=2.4.1,<2.10
 
 # Cryptography for payment signatures
 cryptography==44.0.3
+
+pyrogram
+TgCrypto

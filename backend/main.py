@@ -10,7 +10,10 @@ import httpx
 import logging
 from datetime import datetime, date
 from decimal import Decimal
-from dotenv import load_dotenv
+from dotenv import load_dotenvimport base64
+from pyrogram import Client
+from pyrogram.errors import UsernameNotOccupied, UsernameInvalid, FloodWait, AuthKeyUnregistered
+
 
 # Load environment variables
 load_dotenv()
@@ -66,6 +69,18 @@ async def get_authenticated_user(
         raise HTTPException(status_code=403, detail="Invalid or missing Telegram authentication data")
     return user
 
+telegram_client = None
+
+async def get_telegram_client():
+    global telegram_client
+    if telegram_client is None:
+        api_id = os.getenv('TELEGRAM_API_ID')
+        api_hash = os.getenv('TELEGRAM_API_HASH')
+        if not api_id or not api_hash:
+            return None
+        telegram_client = Client("my_account", api_id=int(api_id), api_hash=api_hash)
+    return telegram_client
+
 # User routes
 @app.post("/api/users", response_model=UserResponse)
 async def create_user(
@@ -100,65 +115,46 @@ async def update_current_user(
     updated_user = await storage.update_user(current_user.id, update_dict)
     return updated_user
 
+
+
 @app.get("/api/getPhoto")
-async def get_photo(
-    username: str,
-    storage: Storage = Depends(get_storage)
-):
+async def get_photo(username: str):
     try:
-        # Ищем пользователя по username
-        user = await storage.get_user_by_username(username)
-        if not user:
-            return {"error": "User not found", "success": False}
+        client = await get_telegram_client()
+        if not client:
+            return {"error": "Service temporarily unavailable", "success": False}
         
-        # Получаем BOT_TOKEN из переменных окружения
-        bot_token = os.getenv('BOT_TOKEN')
-        if not bot_token:
-            logger.error("BOT_TOKEN not configured")
-            return {"error": "Bot not configured", "success": False}
+        clean_username = username.lstrip('@')
         
-        logger.info(f"Getting photo for user {username} (telegram_id: {user.telegram_id})")
-        
-        async with httpx.AsyncClient() as client:
-            # Получаем фото профиля
-            photos_response = await client.get(
-                f"https://api.telegram.org/bot{bot_token}/getUserProfilePhotos",
-                params={"user_id": user.telegram_id, "limit": 1}
-            )
-            photos_data = photos_response.json()
+        async with client:
+            user = await client.get_users(clean_username)
             
-            if not photos_data.get("ok"):
-                logger.warning(f"Telegram API error: {photos_data}")
-                return {"error": "Cannot access Telegram API", "success": False}
-            
-            if not photos_data["result"]["photos"]:
-                logger.info(f"No photos found for user {username}")
-                return {"error": "No photo found", "success": False}
-            
-            # Получаем файл (берем самое большое фото)
-            file_id = photos_data["result"]["photos"][0][-1]["file_id"]
-            file_response = await client.get(
-                f"https://api.telegram.org/bot{bot_token}/getFile",
-                params={"file_id": file_id}
-            )
-            file_data = file_response.json()
-            
-            if not file_data.get("ok"):
-                logger.warning(f"Cannot get file: {file_data}")
-                return {"error": "Cannot get file", "success": False}
-            
-            photo_url = f"https://api.telegram.org/file/bot{bot_token}/{file_data['result']['file_path']}"
-            
-            logger.info(f"Successfully got photo for user {username}")
-            return {
-                "photo_url": photo_url,
-                "first_name": user.first_name,
-                "success": True
-            }
-            
-    except httpx.RequestError as e:
-        logger.error(f"Network error getting photo for {username}: {e}")
-        return {"error": "Network error", "success": False}
+            if user.photo:
+                # Скачиваем в память
+                photo_bytes = await client.download_media(user.photo.big_file_id, in_memory=True)
+                
+                # Конвертируем в base64
+                photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode()
+                photo_url = f"data:image/jpeg;base64,{photo_base64}"
+                
+                return {
+                    "photo_url": photo_url,
+                    "first_name": user.first_name or clean_username,
+                    "success": True
+                }
+            else:
+                # Заглушка если нет фото
+                avatar_url = f"https://ui-avatars.com/api/?name={clean_username}&size=128&background=4E7FFF&color=fff"
+                return {
+                    "photo_url": avatar_url,
+                    "first_name": user.first_name or clean_username,
+                    "success": True
+                }
+                
+    except (UsernameNotOccupied, UsernameInvalid):
+        return {"error": "User not found", "success": False}
+    except (FloodWait, AuthKeyUnregistered):
+        return {"error": "Service temporarily unavailable", "success": False}
     except Exception as e:
         logger.error(f"Error getting photo for {username}: {e}")
         return {"error": "User not found", "success": False}
