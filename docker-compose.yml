@@ -5,6 +5,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
       - DATABASE_URL=sqlite+aiosqlite:///./data/app.db
       - DEVELOPMENT=false
       - BOT_TOKEN=${BOT_TOKEN}
