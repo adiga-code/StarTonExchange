@@ -75,28 +75,18 @@ telegram_client = None
 async def get_telegram_client():
     global telegram_client
     if telegram_client is None:
-        api_id = os.getenv('TELEGRAM_API_ID')
-        api_hash = os.getenv('TELEGRAM_API_HASH')
-        logger.info(f"Environment variables: API_ID={api_id}, API_HASH={'***' if api_hash else 'None'}")
+        session_string = os.getenv('TELEGRAM_SESSION_STRING')
         
-      
-        session_file = "my_account.session"
-        session_exists = os.path.exists(session_file)
-        logger.info(f"Session file exists: {session_exists}")
-        if session_exists:
-            file_size = os.path.getsize(session_file)
-            logger.info(f"Session file size: {file_size} bytes")
-        
-        if not api_id or not api_hash:
-            logger.error("API credentials missing")
-            return None
-            
-        try:
+        if session_string:
+            logger.info("Using session string")
+            telegram_client = Client("my_account", session_string=session_string)
+        else:
+            logger.info("Using file session")
+            api_id = os.getenv('TELEGRAM_API_ID')
+            api_hash = os.getenv('TELEGRAM_API_HASH')
             telegram_client = Client("my_account", api_id=int(api_id), api_hash=api_hash)
-            logger.info("Telegram client created")
-        except Exception as e:
-            logger.error(f"Error creating client: {e}")
-            return None
+        
+        logger.info("Telegram client created")
     return telegram_client
 
 # User routes
