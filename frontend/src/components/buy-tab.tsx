@@ -45,12 +45,10 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       if (data.success) {
         setUserPhoto(data);
         setUserError('');
-      } } else {
-        // Показывать конкретное сообщение от бэка
+      } else {
         setUserError(data.error === "Service temporarily unavailable" 
-    ? "Сервис временно недоступен" 
-    : "Пользователь не найден");
-}
+          ? "Сервис временно недоступен" 
+          : "Пользователь не найден");
       }
     } catch {
       setUserError('Пользователь не найден');
