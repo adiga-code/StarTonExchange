@@ -42,6 +42,8 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     try {
       const response = await fetch(`/api/getPhoto?username=${username}`);
       const data = await response.json();
+      console.log('Response data:', data); // ← ДОБАВЬ ЭТУ СТРОКУ
+      
       if (data.success) {
         setUserPhoto(data);
         setUserError('');
