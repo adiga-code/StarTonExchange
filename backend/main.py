@@ -79,8 +79,7 @@ async def get_telegram_client():
         api_hash = os.getenv('TELEGRAM_API_HASH')
         logger.info(f"Environment variables: API_ID={api_id}, API_HASH={'***' if api_hash else 'None'}")
         
-        # Проверяем файл сессии
-        import os
+      
         session_file = "my_account.session"
         session_exists = os.path.exists(session_file)
         logger.info(f"Session file exists: {session_exists}")
