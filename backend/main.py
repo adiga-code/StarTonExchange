@@ -134,6 +134,7 @@ async def get_photo(username: str):
     logger.info(f"Getting photo for username: {username}")
     
     try:
+        logger.info(f"Getting photo for username: {username}")
         # Добавляем проверку на существование fragment_api_client
         if not hasattr(app.state, 'fragment_api_client') or app.state.fragment_api_client is None:
             logger.warning("Fragment API client not initialized")
