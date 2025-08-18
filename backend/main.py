@@ -133,51 +133,45 @@ async def update_current_user(
 async def get_photo(username: str):
     logger.info(f"Getting photo for username: {username}")
     try:
-        # client = await ensure_telegram_connection()
-        # if not client:
-        #     return {"error": "Service temporarily unavailable", "success": False}
-        
-        # clean_username = username.lstrip('@')
-        
-        # # БЕЗ async with - используем уже подключенного клиента
-        # user = await client.get_users(clean_username)
-        # logger.info(f"Found user: {user.first_name}, has_photo: {bool(user.photo)}")
-        
-        # if user.photo:
-        #     photo_bytes = await client.download_media(user.photo.big_file_id, in_memory=True)
-        #     photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode()
-        #     photo_url = f"data:image/jpeg;base64,{photo_base64}"
-            
-        #     return {
-        #         "photo_url": photo_url,
-        #         "first_name": user.first_name or clean_username,
-        #         "success": True
-        #     }
-        # else:
-        #     avatar_url = f"https://ui-avatars.com/api/?name={clean_username}&size=128&background=4E7FFF&color=fff"
-        #     return {
-        #         "photo_url": avatar_url,
-        #         "first_name": user.first_name or clean_username,
-        #         "success": True
-        #     }
         user = await fragment_api_client.get_user_info(username)
-        logger.info(f'User: {user}')
-        if user:
-            logger.info(f"Found user: {user['username']}, has_photo: {bool(user['photo'])}")
-        else:
+        
+        if not user or not user.get('success') or not user.get('found'):
             logger.warning(f"User {username} not found")
             return {"error": "User not found", "success": False}
-        photo = user['photo']
-        url = photo[photo.find('"')+1:photo.rfind('"')]
+        
+        # Получаем данные пользователя
+        user_name = user.get('name') or user.get('username') or username
+        photo_html = user.get('photo', '')
+        
+        logger.info(f"Found user: {user_name}, has_photo: {bool(photo_html)}")
+        
+        if photo_html and photo_html.strip():
+            try:
+                # Извлекаем URL из HTML тега <img src="URL" />
+                import re
+                src_match = re.search(r'src="([^"]*)"', photo_html)
+                if src_match:
+                    photo_url = src_match.group(1)
+                    return {
+                        "photo_url": photo_url,
+                        "first_name": user_name,
+                        "success": True
+                    }
+                else:
+                    logger.warning(f"Could not extract src from photo HTML: {photo_html}")
+            except Exception as photo_error:
+                logger.error(f"Error extracting photo URL: {photo_error}")
+        
+        # Если фото нет или произошла ошибка, используем аватар по умолчанию
+        avatar_url = f"https://ui-avatars.com/api/?name={user_name}&size=128&background=4E7FFF&color=fff"
         return {
-            "photo_url": url,
-            "first_name": user['name'] or username,
+            "photo_url": avatar_url,
+            "first_name": user_name,
             "success": True
         }
-    except (UsernameNotOccupied, UsernameInvalid):
-        return {"error": "User not found", "success": False}
+            
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"Error getting photo for {username}: {str(e)}")
         return {"error": "User not found", "success": False}
 
 
