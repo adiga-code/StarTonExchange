@@ -454,12 +454,23 @@ async def get_referral_stats(
         
         referral_list = []
         for r in referrals:
-            referral_list.append({
-                "id": r.id,
-                "username": r.username,
-                "first_name": r.first_name,
-                "created_at": r.created_at.isoformat()
-            })
+            # Безопасное получение атрибутов с проверкой типа
+            if isinstance(r, dict):
+                # Если r - это словарь
+                referral_list.append({
+                    "id": r.get("id"),
+                    "username": r.get("username"),
+                    "first_name": r.get("first_name"),
+                    "created_at": r.get("created_at").isoformat() if r.get("created_at") else None
+                })
+            else:
+                # Если r - это объект User из SQLAlchemy
+                referral_list.append({
+                    "id": r.id,
+                    "username": getattr(r, 'username', None),  # Безопасное получение атрибута
+                    "first_name": getattr(r, 'first_name', None),
+                    "created_at": r.created_at.isoformat() if hasattr(r, 'created_at') and r.created_at else None
+                })
         
         return ReferralStats(
             total_referrals=len(referrals),
@@ -468,7 +479,7 @@ async def get_referral_stats(
             referrals=referral_list
         )
     except Exception as e:
-        logger.error(f"Error getting referral stats: {e}")
+        logger.error(f"Error getting referral stats: {e}", exc_info=True)  # Добавляем полный traceback
         raise HTTPException(status_code=500, detail="Failed to get referral stats")
 
 # Payment webhook and status routes

@@ -54,8 +54,29 @@ class Storage:
         return await self.get_user(user_id)
 
     async def get_all_users(self) -> List[User]:
-        result = await self.db.execute(select(User))
-        return result.scalars().all()
+        """Получить всех пользователей из базы данных"""
+        try:
+            result = await self.db.execute(select(User))
+            users = result.scalars().all()
+            
+            # Убедимся, что возвращаем список объектов User
+            # Проверяем, что каждый элемент - это объект User
+            validated_users = []
+            for user in users:
+                if isinstance(user, User):
+                    validated_users.append(user)
+                else:
+                    # Если по какой-то причине получили не объект User, логируем
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Unexpected type in get_all_users: {type(user)}")
+            
+            return validated_users
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in get_all_users: {e}", exc_info=True)
+            raise
 
     # Transaction methods
     async def get_transaction(self, transaction_id: str) -> Optional[Transaction]:
