@@ -113,13 +113,15 @@ async def start_command(message: Message):
 
 🚀 <b>Нажмите кнопку ниже, чтобы начать!</b>
     """
-    
-    await message.answer(
-        welcome_text,
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
-
+    try:
+        await message.answer(
+            welcome_text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except:
+        logger.error("Failed to send welcome message. Check bot permissions and settings.")
+        
 @router.message(F.text == "💰 Баланс")
 async def balance_command(message: Message):
     """Handle balance inquiry"""
