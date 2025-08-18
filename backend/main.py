@@ -824,6 +824,8 @@ async def startup_event():
     await init_db()
     await init_default_data()
     global fragment_api_client
+    global fragment_cookies
+    fragment_cookies=os.getenv("FRAGMENT_COOKIE")
     fragment_api_client = AsyncFragmentAPIClient(
         seed=os.getenv("FRAGMENT_SEED"),
         fragment_cookies=os.getenv("FRAGMENT_COOKIE")
