@@ -252,11 +252,6 @@ async def default_handler(message: Message):
 async def main():
     """Main function to run the bot"""
     try:
-        # Initialize database
-        await init_db()
-        await init_default_data()
-        logger.info("Database initialized")
-        
         # Start polling
         logger.info("Starting bot...")
         await dp.start_polling(bot)
