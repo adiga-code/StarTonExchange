@@ -132,23 +132,46 @@ async def update_current_user(
 @app.get("/api/getPhoto")
 async def get_photo(username: str):
     logger.info(f"Getting photo for username: {username}")
-    #try:
-    if True:
-        user = await fragment_api_client.get_user_info(username)
+    
+    try:
+        # Добавляем проверку на существование fragment_api_client
+        if not hasattr(app.state, 'fragment_api_client') or app.state.fragment_api_client is None:
+            logger.warning("Fragment API client not initialized")
+            # Возвращаем аватар по умолчанию
+            avatar_url = f"https://ui-avatars.com/api/?name={username}&size=128&background=4E7FFF&color=fff"
+            return {
+                "photo_url": avatar_url,
+                "first_name": username,
+                "success": True
+            }
         
-        if not user or not user.get('success') or not user.get('found'):
-            logger.warning(f"User {username} not found")
-            return {"error": "User not found", "success": False}
+        # Вызываем get_user_info с обработкой ошибок
+        user_info = await app.state.fragment_api_client.get_user_info(username)
         
-        # Получаем данные пользователя
-        user_name = user.get('name') or user.get('username') or username
-        photo_html = user.get('photo', '')
+        # Проверяем результат
+        if not user_info or not isinstance(user_info, dict):
+            logger.warning(f"Invalid response from Fragment API for user {username}")
+            raise Exception("Invalid API response")
+            
+        if not user_info.get('success') or not user_info.get('found'):
+            logger.warning(f"User {username} not found in Fragment API")
+            # Возвращаем аватар по умолчанию
+            avatar_url = f"https://ui-avatars.com/api/?name={username}&size=128&background=4E7FFF&color=fff"
+            return {
+                "photo_url": avatar_url,
+                "first_name": username,
+                "success": True
+            }
+        
+        # Получаем данные пользователя из ответа API
+        user_name = user_info.get('name') or user_info.get('username') or username
+        photo_html = user_info.get('photo', '')
         
         logger.info(f"Found user: {user_name}, has_photo: {bool(photo_html)}")
         
+        # Пытаемся извлечь URL фото из HTML
         if photo_html and photo_html.strip():
             try:
-                # Извлекаем URL из HTML тега <img src="URL" />
                 import re
                 src_match = re.search(r'src="([^"]*)"', photo_html)
                 if src_match:
@@ -171,11 +194,17 @@ async def get_photo(username: str):
             "success": True
         }
             
-    #except Exception as e:
-    else:
-        logger.error(f"Error getting photo for {username}: {str(e)}")
-        return {"error": "User not found", "success": False}
-
+    except Exception as e:
+        # Логируем полную ошибку для отладки
+        logger.error(f"Error getting photo for {username}: {str(e)}", exc_info=True)
+        
+        # Возвращаем аватар по умолчанию даже при ошибке
+        avatar_url = f"https://ui-avatars.com/api/?name={username}&size=128&background=4E7FFF&color=fff"
+        return {
+            "photo_url": avatar_url,
+            "first_name": username,
+            "success": True
+        }
 
 # Purchase routes
 @app.post("/api/purchase/calculate", response_model=PurchaseCalculateResponse)
@@ -817,28 +846,48 @@ if not os.getenv("DEVELOPMENT"):
     async def serve_spa(path: str):
         return FileResponse("dist/public/index.html")
 
-# Startup event
 @app.on_event("startup")
 async def startup_event():
-    
     await init_db()
     await init_default_data()
-    global fragment_api_client
-    fragment_api_client = AsyncFragmentAPIClient(
-        seed=os.getenv("FRAGMENT_SEED"),
-        fragment_cookies=os.getenv("FRAGMENT_COOKIE")
-    )
+    
+    # Правильная инициализация Fragment API клиента
+    try:
+        fragment_seed = os.getenv("FRAGMENT_SEED")
+        fragment_cookies = os.getenv("FRAGMENT_COOKIE")
+        
+        if fragment_seed and fragment_cookies:
+            app.state.fragment_api_client = AsyncFragmentAPIClient(
+                seed=fragment_seed,
+                fragment_cookies=fragment_cookies
+            )
+            logger.info("Fragment API client initialized successfully")
+        else:
+            logger.warning("Fragment API credentials not found, client not initialized")
+            app.state.fragment_api_client = None
+            
+    except Exception as e:
+        logger.error(f"Failed to initialize Fragment API client: {e}")
+        app.state.fragment_api_client = None
+    
     logger.info("Database initialized")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    if fragment_api_client:
-        await fragment_api_client.close()
-    logger.info("Fragment API client closed")
+    # Правильное закрытие Fragment API клиента
+    if hasattr(app.state, 'fragment_api_client') and app.state.fragment_api_client:
+        try:
+            await app.state.fragment_api_client.close()
+            logger.info("Fragment API client closed")
+        except Exception as e:
+            logger.error(f"Error closing Fragment API client: {e}")
     
     # Close database session
-    await AsyncSessionLocal().close()
-    logger.info("Database session closed")
+    try:
+        await AsyncSessionLocal().close()
+        logger.info("Database session closed")
+    except Exception as e:
+        logger.error(f"Error closing database session: {e}")
 
 if __name__ == "__main__":
     import uvicorn
