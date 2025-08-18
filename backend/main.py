@@ -862,8 +862,15 @@ if not os.getenv("DEVELOPMENT"):
 async def startup_event():
     await init_db()
     await init_default_data()
-    
+    logger.info("Database initialized")
+    # Инициализация Fragment API клиента
     logger.info("Starting Fragment API initialization...")
+        # Диагностика переменных окружения
+    fragment_seed = os.getenv("FRAGMENT_SEED")
+    fragment_cookies = os.getenv("FRAGMENT_COOKIE")
+    
+    logger.info(f"FRAGMENT_SEED length: {len(fragment_seed) if fragment_seed else 'None'}")
+    logger.info(f"FRAGMENT_COOKIE length: {len(fragment_cookies) if fragment_cookies else 'None'}")
     
     try:
         fragment_seed = os.getenv("FRAGMENT_SEED")
@@ -890,7 +897,7 @@ async def startup_event():
         logger.error(f"Failed to initialize Fragment API client: {e}", exc_info=True)
         app.state.fragment_api_client = None
     
-    logger.info("Database initialized")
+    
 
 @app.on_event("shutdown")
 async def shutdown_event():
