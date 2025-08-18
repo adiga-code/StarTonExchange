@@ -134,7 +134,7 @@ async def get_photo(username: str):
     logger.info(f"Getting photo for username: {username}")
     #try:
     if True:
-        user = await fragment_api_client.get_user_info(username)
+        user = await fragment_api_client.get_user_info(username, fragment_cookies=fragment_cookies)
         
         if not user or not user.get('success') or not user.get('found'):
             logger.warning(f"User {username} not found")
