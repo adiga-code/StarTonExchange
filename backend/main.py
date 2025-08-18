@@ -134,7 +134,7 @@ async def get_photo(username: str):
     logger.info(f"Getting photo for username: {username}")
     #try:
     if True:
-        user = await fragment_api_client.get_user_info(username, fragment_cookies=fragment_cookies)
+        user = await fragment_api_client.get_user_info(username)
         
         if not user or not user.get('success') or not user.get('found'):
             logger.warning(f"User {username} not found")
@@ -824,8 +824,6 @@ async def startup_event():
     await init_db()
     await init_default_data()
     global fragment_api_client
-    global fragment_cookies
-    fragment_cookies=os.getenv("FRAGMENT_COOKIE")
     fragment_api_client = AsyncFragmentAPIClient(
         seed=os.getenv("FRAGMENT_SEED"),
         fragment_cookies=os.getenv("FRAGMENT_COOKIE")
