@@ -636,7 +636,7 @@ async def get_admin_stats(storage: Storage = Depends(get_storage)):
             user = next((u for u in users if u.id == t.user_id), None)
             recent_transactions.append({
                 "id": t.id,
-                "username": user.username if user else "Unknown",
+                "username": user.get("username") if isinstance(user, dict) else (user.username if user else "Unknown"),
                 "description": t.description,
                 "status": t.status,
                 "created_at": t.created_at.isoformat()
