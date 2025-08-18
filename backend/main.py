@@ -886,7 +886,7 @@ async def startup_event():
                 fragment_cookies=fragment_cookies
             )
             logger.info("Fragment API client initialized successfully")
-             
+              
             balance = await app.state.fragment_api_client.get_balance()
             logger.info(f"Fragment API balance: {balance}")
         else:
