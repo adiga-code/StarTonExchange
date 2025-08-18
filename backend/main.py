@@ -878,7 +878,7 @@ async def startup_event():
         
         logger.info(f"Fragment seed exists: {bool(fragment_seed)}")
         logger.info(f"Fragment cookies exist: {bool(fragment_cookies)}")
-        
+         
         if fragment_seed and fragment_cookies:
             logger.info("Creating Fragment API client...")
             app.state.fragment_api_client = AsyncFragmentAPIClient(
