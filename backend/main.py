@@ -132,7 +132,8 @@ async def update_current_user(
 @app.get("/api/getPhoto")
 async def get_photo(username: str):
     logger.info(f"Getting photo for username: {username}")
-    try:
+    #try:
+    if True:
         user = await fragment_api_client.get_user_info(username)
         
         if not user or not user.get('success') or not user.get('found'):
@@ -170,7 +171,8 @@ async def get_photo(username: str):
             "success": True
         }
             
-    except Exception as e:
+    #except Exception as e:
+    else:
         logger.error(f"Error getting photo for {username}: {str(e)}")
         return {"error": "User not found", "success": False}
 
