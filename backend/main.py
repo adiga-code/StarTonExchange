@@ -887,7 +887,7 @@ async def startup_event():
             )
             logger.info("Fragment API client initialized successfully")
             
-            balance = app.state.fragment_api_client.get_balance()
+            balance = await app.state.fragment_api_client.get_balance()
             logger.info(f"Fragment API balance: {balance}")
         else:
             logger.warning("Fragment API credentials not found, client not initialized")
