@@ -162,15 +162,15 @@ async def get_photo(username: str):
         #     }
         user = await fragment_api_client.get_user_info(username)
         if user:
-            logger.info(f"Found user: {user.username}, has_photo: {bool(user.photo)}")
+            logger.info(f"Found user: {user['username']}, has_photo: {bool(user['photo'])}")
         else:
             logger.warning(f"User {username} not found")
             return {"error": "User not found", "success": False}
-        photo = user.photo
+        photo = user['photo']
         url = photo[photo.find('"')+1:photo.rfind('"')]
         return {
             "photo_url": url,
-            "first_name": user.name or username,
+            "first_name": user['name'] or username,
             "success": True
         }
     except (UsernameNotOccupied, UsernameInvalid):
