@@ -863,17 +863,23 @@ async def startup_event():
     await init_db()
     await init_default_data()
     
-    # Правильная инициализация Fragment API клиента
+    logger.info("Starting Fragment API initialization...")
+    
     try:
         fragment_seed = os.getenv("FRAGMENT_SEED")
         fragment_cookies = os.getenv("FRAGMENT_COOKIE")
         
+        logger.info(f"Fragment seed exists: {bool(fragment_seed)}")
+        logger.info(f"Fragment cookies exist: {bool(fragment_cookies)}")
+        
         if fragment_seed and fragment_cookies:
+            logger.info("Creating Fragment API client...")
             app.state.fragment_api_client = AsyncFragmentAPIClient(
                 seed=fragment_seed,
                 fragment_cookies=fragment_cookies
             )
             logger.info("Fragment API client initialized successfully")
+            
             balance = app.state.fragment_api_client.get_balance()
             logger.info(f"Fragment API balance: {balance}")
         else:
@@ -881,7 +887,7 @@ async def startup_event():
             app.state.fragment_api_client = None
             
     except Exception as e:
-        logger.error(f"Failed to initialize Fragment API client: {e}")
+        logger.error(f"Failed to initialize Fragment API client: {e}", exc_info=True)
         app.state.fragment_api_client = None
     
     logger.info("Database initialized")
