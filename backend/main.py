@@ -898,7 +898,7 @@ async def startup_event():
         app.state.fragment_api_client = None
     from bot import main as bot_main
     # Запуск бота в фоновом режиме
-    asyncio.run(bot_main())
+    await bot_main()
     
 
 @app.on_event("shutdown")
