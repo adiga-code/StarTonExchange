@@ -874,6 +874,7 @@ async def startup_event():
                 fragment_cookies=fragment_cookies
             )
             logger.info("Fragment API client initialized successfully")
+            app.state.fragment_api_client.get_balance()
         else:
             logger.warning("Fragment API credentials not found, client not initialized")
             app.state.fragment_api_client = None
