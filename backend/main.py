@@ -20,6 +20,7 @@ from pyrogram.errors import UsernameNotOccupied, UsernameInvalid, FloodWait, Aut
 load_dotenv()
 
 from database import get_db, init_db, init_default_data, AsyncSessionLocal
+from api import AsyncFragmentAPIClient
 from storage import Storage
 from telegram_auth import get_current_user
 from robokassa import get_robokassa
@@ -132,33 +133,46 @@ async def update_current_user(
 async def get_photo(username: str):
     logger.info(f"Getting photo for username: {username}")
     try:
-        client = await ensure_telegram_connection()
-        if not client:
-            return {"error": "Service temporarily unavailable", "success": False}
+        # client = await ensure_telegram_connection()
+        # if not client:
+        #     return {"error": "Service temporarily unavailable", "success": False}
         
-        clean_username = username.lstrip('@')
+        # clean_username = username.lstrip('@')
         
-        # БЕЗ async with - используем уже подключенного клиента
-        user = await client.get_users(clean_username)
-        logger.info(f"Found user: {user.first_name}, has_photo: {bool(user.photo)}")
+        # # БЕЗ async with - используем уже подключенного клиента
+        # user = await client.get_users(clean_username)
+        # logger.info(f"Found user: {user.first_name}, has_photo: {bool(user.photo)}")
         
-        if user.photo:
-            photo_bytes = await client.download_media(user.photo.big_file_id, in_memory=True)
-            photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode()
-            photo_url = f"data:image/jpeg;base64,{photo_base64}"
+        # if user.photo:
+        #     photo_bytes = await client.download_media(user.photo.big_file_id, in_memory=True)
+        #     photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode()
+        #     photo_url = f"data:image/jpeg;base64,{photo_base64}"
             
-            return {
-                "photo_url": photo_url,
-                "first_name": user.first_name or clean_username,
-                "success": True
-            }
+        #     return {
+        #         "photo_url": photo_url,
+        #         "first_name": user.first_name or clean_username,
+        #         "success": True
+        #     }
+        # else:
+        #     avatar_url = f"https://ui-avatars.com/api/?name={clean_username}&size=128&background=4E7FFF&color=fff"
+        #     return {
+        #         "photo_url": avatar_url,
+        #         "first_name": user.first_name or clean_username,
+        #         "success": True
+        #     }
+        user = await fragment_api_client.get_user_info(username)
+        if user:
+            logger.info(f"Found user: {user.username}, has_photo: {bool(user.photo)}")
         else:
-            avatar_url = f"https://ui-avatars.com/api/?name={clean_username}&size=128&background=4E7FFF&color=fff"
-            return {
-                "photo_url": avatar_url,
-                "first_name": user.first_name or clean_username,
-                "success": True
-            }
+            logger.warning(f"User {username} not found")
+            return {"error": "User not found", "success": False}
+        photo = user.photo
+        url = photo[photo.find('"')+1:photo.rfind('"')]
+        return {
+            "photo_url": url,
+            "first_name": user.name or username,
+            "success": True
+        }
     except (UsernameNotOccupied, UsernameInvalid):
         return {"error": "User not found", "success": False}
     except Exception as e:
@@ -809,9 +823,25 @@ if not os.getenv("DEVELOPMENT"):
 # Startup event
 @app.on_event("startup")
 async def startup_event():
+    
     await init_db()
     await init_default_data()
+    global fragment_api_client
+    fragment_api_client = AsyncFragmentAPIClient(
+        seed=os.getenv("FRAGMENT_SEED"),
+        fragment_cookies=os.getenv("FRAGMENT_COOKIE")
+    )
     logger.info("Database initialized")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    if fragment_api_client:
+        await fragment_api_client.close()
+    logger.info("Fragment API client closed")
+    
+    # Close database session
+    await AsyncSessionLocal().close()
+    logger.info("Database session closed")
 
 if __name__ == "__main__":
     import uvicorn
