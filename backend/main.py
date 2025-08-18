@@ -161,6 +161,7 @@ async def get_photo(username: str):
         #         "success": True
         #     }
         user = await fragment_api_client.get_user_info(username)
+        logger.info(f'User: {user}')
         if user:
             logger.info(f"Found user: {user['username']}, has_photo: {bool(user['photo'])}")
         else:
