@@ -464,13 +464,14 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
          ))}
        </div>
      </motion.div>
+     
+     {/* Payment Method Modal */}
+     <PaymentMethodModal
+       isOpen={isPaymentModalOpen}
+       onClose={() => setIsPaymentModalOpen(false)}
+       onSelectSBP={handleSBPPayment}
+       isLoading={purchaseMutation.isPending || isProcessing}
+     />
    </div>
-  {/* Payment Method Modal */}
-  <PaymentMethodModal
-    isOpen={isPaymentModalOpen}
-    onClose={() => setIsPaymentModalOpen(false)}
-    onSelectSBP={handleSBPPayment}
-    isLoading={purchaseMutation.isPending || isProcessing}
-  />
  );
 }
