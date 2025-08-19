@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SnakeCaseUser, User } from "@shared/schema";
+import { PaymentMethodModal } from "@/components/payment-method-modal";
 
 interface BuyTabProps {
  user?: SnakeCaseUser;
@@ -38,6 +39,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
  const { hapticFeedback } = useTelegram();
  const queryClient = useQueryClient();
  const timeoutRef = useRef<NodeJS.Timeout>();
+ const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
  const fetchUserPhoto = async (username: string) => {
    setIsLoadingPhoto(true);
@@ -194,22 +196,27 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
    setAmount(quickAmount.toString());
  };
 
- const handlePurchase = async () => {
-   if (!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing || !recipientUsername.trim()) return;
+  const handleOpenPaymentModal = () => {
+    if (!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing || !recipientUsername.trim()) return;
+    hapticFeedback('light');
+    setIsPaymentModalOpen(true);
+  };
 
-   hapticFeedback('medium');
+  const handleSBPPayment = async () => {
+    setIsPaymentModalOpen(false);
+    hapticFeedback('medium');
 
-   try {
-     await purchaseMutation.mutateAsync({
-       currency: selectedCurrency,
-       amount: parseFloat(amount),
-       rub_amount: parseFloat(priceCalculation.total_price),
-       username: userPhoto ? recipientUsername : undefined,
-     });
-   } catch (error) {
-     // Error handling is done in onError callback
-   }
- };
+    try {
+      await purchaseMutation.mutateAsync({
+        currency: selectedCurrency,
+        amount: parseFloat(amount),
+        rub_amount: parseFloat(priceCalculation?.total_price || '0'),
+        username: userPhoto ? recipientUsername : undefined,
+      });
+    } catch (error) {
+      // Error handling is done in onError callback
+    }
+  };
 
  const prices = {
    stars: 2.30,
@@ -402,7 +409,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
 
          {/* Purchase Button */}
          <Button
-           onClick={handlePurchase}
+           onClick={handleOpenPaymentModal}
            disabled={!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing || !recipientUsername.trim()}
            className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white font-semibold py-3 transition-all disabled:opacity-50"
            size="lg"
@@ -420,7 +427,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
            ) : (
              <>
                <ExternalLink className="w-4 h-4 mr-2" />
-               Перейти к оплате
+               Выбрать способ оплаты
              </>
            )}
          </Button>
@@ -458,5 +465,12 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
        </div>
      </motion.div>
    </div>
+  {/* Payment Method Modal */}
+  <PaymentMethodModal
+    isOpen={isPaymentModalOpen}
+    onClose={() => setIsPaymentModalOpen(false)}
+    onSelectSBP={handleSBPPayment}
+    isLoading={purchaseMutation.isPending || isProcessing}
+  />
  );
 }
