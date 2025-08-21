@@ -29,33 +29,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # Добавляем бота как отдельный сервис
-  bot:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.bot
-    environment:
-      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
-      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
-      - TELEGRAM_SESSION_STRING=${TELEGRAM_SESSION_STRING}
-      - ADMIN_TOKENS=${ADMIN_TOKENS}
-      - DATABASE_URL=sqlite+aiosqlite:///./data/app.db
-      - DEVELOPMENT=false
-      - BOT_TOKEN=${BOT_TOKEN}
-      - WEBAPP_URL=${WEBAPP_URL}
-    volumes:
-      - ./data:/app/data
-    networks:
-      - app
-    restart: unless-stopped
-    depends_on:
-      - backend
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-
   frontend:
     build:
       context: ./frontend
