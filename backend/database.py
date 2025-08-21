@@ -47,42 +47,19 @@ async def init_default_data():
         default_settings = [
             Setting(key="stars_price", value="2.30"),
             Setting(key="ton_price", value="420.50"),
-            Setting(key="markup_percentage", value="5"),
+            Setting(key="markup_percentage", value="5"),  # Для обратной совместимости
+            Setting(key="ton_markup_percentage", value="5"),
+            Setting(key="referral_percentage", value="10"),
+            Setting(key="telegram_stars_official_price", value="180"),
+            Setting(key="news_channel_url", value="https://t.me/starsexchange_news"),
+            Setting(key="news_channel_username", value="@starsexchange_news"),
+            Setting(key="sharing_text", value="Попробуй этот крутой обменник Stars и TON!"),
+            Setting(key="referral_sharing_text", value="Попробуй этот крутой обменник Stars и TON! 🚀"),
         ]
         
         for setting in default_settings:
             session.add(setting)
         
-        # Initialize default tasks
-        default_tasks = [
-            Task(
-                title="Ежедневный вход",
-                description="Заходите каждый день",
-                reward=10,
-                type="daily",
-                action="daily_login",
-                is_active=True,
-            ),
-            Task(
-                title="Поделиться с другом",
-                description="Пригласите 1 друга",
-                reward=25,
-                type="referral",
-                action="share_app",
-                is_active=True,
-            ),
-            Task(
-                title="Подписаться на канал",
-                description="@starsexchange_news",
-                reward=50,
-                type="social",
-                action="follow_channel",
-                is_active=True,
-            ),
-        ]
-        
-        for task in default_tasks:
-            session.add(task)
-        
+        # Не добавляем дефолтные задания - админ создаст сам
         await session.commit()
         print("Default data initialized")
