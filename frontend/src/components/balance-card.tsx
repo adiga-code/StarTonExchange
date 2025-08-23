@@ -51,7 +51,6 @@ export default function BalanceCard({ user }: BalanceCardProps) {
         <div className="space-y-4">
           <div className="flex items-center justify-center">
             <div className="flex items-center">
-              <Star className="w-6 h-6 text-yellow-300 mr-3" />
               <div>
                 <motion.span
                   className="text-3xl font-bold"
@@ -63,6 +62,7 @@ export default function BalanceCard({ user }: BalanceCardProps) {
                   {starsBalance.toLocaleString()}
                 </motion.span>
               </div>
+              <Star className="w-6 h-6 text-yellow-300 mr-3" />
               {/* <p className="text-gray-200 text-sm ml-2">Telegram Stars</p> */}
             </div>
           </div>
