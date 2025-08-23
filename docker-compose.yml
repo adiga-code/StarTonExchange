@@ -29,6 +29,31 @@ services:
       timeout: 10s
       retries: 3
 
+  bot:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+      - TELEGRAM_SESSION_STRING=${TELEGRAM_SESSION_STRING}
+      - ADMIN_TOKENS=${ADMIN_TOKENS}
+      - DATABASE_URL=sqlite+aiosqlite:///./data/app.db
+      - DEVELOPMENT=false
+      - BOT_TOKEN=${BOT_TOKEN}
+      - FRAGMENT_SEED=${FRAGMENT_SEED}
+      - FRAGMENT_COOKIE=${FRAGMENT_COOKIE}
+      - ROBOKASSA_MERCHANT_LOGIN=${ROBOKASSA_MERCHANT_LOGIN}
+      - ROBOKASSA_PASSWORD1=${ROBOKASSA_PASSWORD1}
+      - ROBOKASSA_PASSWORD2=${ROBOKASSA_PASSWORD2}
+      - ROBOKASSA_TEST_MODE=${ROBOKASSA_TEST_MODE}
+    volumes:
+      - ./data:/app/data
+    networks:
+      - app
+    restart: unless-stopped
+    command: ["python", "bot.py"]
+
   frontend:
     build:
       context: ./frontend
@@ -53,6 +78,7 @@ services:
     depends_on:
       - backend
       - frontend
+      - bot
     networks:
       - app
     restart: unless-stopped
