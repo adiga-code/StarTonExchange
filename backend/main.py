@@ -126,13 +126,41 @@ async def get_current_user_info(
 
 @app.put("/api/users/me", response_model=UserResponse)
 async def update_current_user(
-    updates: UserUpdate,
+    user_data: UserUpdate,
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    update_dict = {k: v for k, v in updates.dict().items() if v is not None}
-    updated_user = await storage.update_user(current_user.id, update_dict)
-    return updated_user
+    """Обновить данные текущего пользователя"""
+    try:
+        # Создаем словарь только с переданными данными (не None)
+        update_data = {}
+        if user_data.username is not None:
+            update_data["username"] = user_data.username
+        if user_data.first_name is not None:
+            update_data["first_name"] = user_data.first_name
+        if user_data.last_name is not None:
+            update_data["last_name"] = user_data.last_name  
+        if user_data.notifications_enabled is not None:
+            update_data["notifications_enabled"] = user_data.notifications_enabled
+            
+        if not update_data:
+            # Если нет данных для обновления, просто возвращаем текущего пользователя
+            return current_user
+            
+        # Обновляем пользователя
+        updated_user = await storage.update_user(current_user.id, update_data)
+        
+        if not updated_user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        logger.info(f"User {current_user.telegram_id} updated: {update_data}")
+        return updated_user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update user")
 
 @app.get("/api/transactions/history", response_model=TransactionHistoryResponse)
 async def get_user_transactions_history(

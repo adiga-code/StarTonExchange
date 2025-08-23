@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useTelegram } from "@/hooks/use-telegram";
 import { useUserAvatar } from "@/hooks/use-user-avatar";
@@ -53,6 +53,7 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
   const { toast } = useToast();
   const { hapticFeedback, shareApp } = useTelegram();
   const userAvatar = useUserAvatar(user?.username);
+  const queryClient = useQueryClient();
 
   const { data: referralStats } = useQuery({
     queryKey: ['/api/referrals/stats'],
@@ -90,6 +91,32 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
     },
     refetchOnWindowFocus: false,
     refetchOnMount: true,
+  });
+
+  // Mutation для обновления настроек пользователя
+  const updateUserMutation = useMutation({
+    mutationFn: async (updateData: { notifications_enabled?: boolean }) => {
+      const response = await apiRequest('PUT', '/api/users/me', updateData);
+      return response.json();
+    },
+    onSuccess: (updatedUser) => {
+      // Обновляем кэш пользователя
+      queryClient.setQueryData(['/api/users/me'], updatedUser);
+      hapticFeedback('success');
+      toast({
+        title: "Настройки обновлены",
+        description: "Изменения успешно сохранены",
+      });
+    },
+    onError: (error) => {
+      console.error('Error updating user:', error);
+      hapticFeedback('error');
+      toast({
+        title: "Ошибка",
+        description: "Не удалось обновить настройки",
+        variant: "destructive",
+      });
+    },
   });
 
   const getUserInitials = () => {
@@ -135,6 +162,11 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
       hapticFeedback('light');
       onTabChange('earn');
     }
+  };
+
+  const handleNotificationsToggle = (checked: boolean) => {
+    hapticFeedback('light');
+    updateUserMutation.mutate({ notifications_enabled: checked });
   };
 
   const getTransactionIcon = (iconType: string) => {
@@ -348,12 +380,18 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
             </div>
             <Switch
               checked={user?.notifications_enabled ?? true}
-              onCheckedChange={(checked) => {
-                // TODO: Update user notifications preference
-                hapticFeedback('light');
-              }}
+              onCheckedChange={handleNotificationsToggle}
+              disabled={updateUserMutation.isPending}
             />
           </div>
+          
+          {/* Индикатор загрузки */}
+          {updateUserMutation.isPending && (
+            <div className="flex items-center text-sm text-gray-500">
+              <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full mr-2"></div>
+              Сохранение...
+            </div>
+          )}
         </div>
       </motion.div>
 
