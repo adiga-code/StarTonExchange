@@ -23,9 +23,9 @@ WORKDIR /app
 # Копируем package.json и package-lock.json отдельно для кеширования зависимостей
 COPY package*.json ./
 
-# Очищаем npm кеш и устанавливаем зависимости
+# Очищаем npm кеш и устанавливаем ВСЕ зависимости (включая dev для сборки)
 RUN npm cache clean --force && \
-    npm ci --only=production --no-audit --no-fund --prefer-offline
+    npm ci --no-audit --no-fund --prefer-offline
 
 # Копируем конфиги и исходники
 COPY vite.config.ts ./
