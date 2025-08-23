@@ -63,7 +63,7 @@ export default function BalanceCard({ user }: BalanceCardProps) {
                   {starsBalance.toLocaleString()}
                 </motion.span>
               </div>
-              <p className="text-gray-200 text-sm ml-2">Telegram Stars</p>
+              {/* <p className="text-gray-200 text-sm ml-2">Telegram Stars</p> */}
             </div>
           </div>
           
