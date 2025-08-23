@@ -314,14 +314,20 @@ class Storage:
 
     async def get_cached_setting(self, key: str) -> str:
         if key in self._settings_cache:
+            import logging
+            logging.info(f"Cache hit for key: {key} with value: {self._settings_cache[key]}")
             return self._settings_cache[key]
             
         setting = await self.get_setting(key)
         value = setting.value if setting else ""
+        import logging
+        logging.info(f"Cache miss for key: {key}, loading value: {value}")
         self._settings_cache[key] = value
         return value
     
     async def update_setting(self, key: str, value: str):
+        import logging
+        logging.info(f"Updating setting key: {key} with value: {value}")
         # Найти или создать setting
         result = await self.db.execute(
             select(Setting).where(Setting.key == key)
@@ -339,4 +345,5 @@ class Storage:
         
         # Инвалидировать кэш
         if key in self._settings_cache:
+            logging.info(f"Invalidating cache for key: {key}")
             del self._settings_cache[key]
