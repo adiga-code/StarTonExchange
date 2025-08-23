@@ -49,12 +49,17 @@ export default function AdminPage() {
       return response.json();
     },
     onSuccess: () => {
-      hapticFeedback('success');
       toast({
         title: "Настройки обновлены",
         description: "Цены успешно обновлены",
       });
+      
+      // ✅ Инвалидируй кеш ВЕЗДЕ
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/settings/current'] });
       queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+      
+      // ✅ Принудительно обнови ВСЕ запросы
+      queryClient.refetchQueries({ queryKey: ['/api/admin/settings/current'] });
     },
     onError: () => {
       hapticFeedback('error');
