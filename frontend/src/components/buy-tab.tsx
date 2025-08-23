@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useTelegram } from "@/hooks/use-telegram";
-import { Star, Bitcoin, ShoppingCart, Calculator, ExternalLink } from "lucide-react";
+import { Star, Bitcoin, ShoppingCart, Calculator } from "@/components/ui/custom-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

@@ -2,7 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { Star } from "lucide-react";
+import { Star } from "@/components/ui/custom-icons";
 import type { SnakeCaseUser } from "@shared/schema";
 
 interface BalanceCardProps {

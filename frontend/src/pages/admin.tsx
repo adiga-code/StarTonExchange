@@ -12,7 +12,7 @@ import {
   DollarSign,
   Activity,
   ArrowLeft,
-} from "lucide-react";
+} from "@/components/ui/custom-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

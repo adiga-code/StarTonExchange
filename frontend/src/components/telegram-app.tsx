@@ -12,7 +12,7 @@ import TasksTab from "./tasks-tab";
 import ProfileTab from "./profile-tab";
 import LoadingModal from "./loading-modal";
 import TelegramGuard from "./telegram-guard";
-import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Coins, TrendingUp } from "lucide-react";
+import { Star, Moon, Sun, User, ShoppingCart, CheckSquare, Coins, TrendingUp } from "@/components/ui/custom-icons";
 import type { SnakeCaseUser, User as UserType } from "../../shared/schema";
 
 type TabType = 'buy' | 'earn' | 'sell' | 'profile';
