@@ -13,8 +13,12 @@ import { Link } from "wouter";
 export default function AdminPage() {
   const [starsPrice, setStarsPrice] = useState('');
   const [tonPrice, setTonPrice] = useState('');
+  const [markupPercentage, setMarkupPercentage] = useState('5');
+  const { toast } = useToast();
+  const { hapticFeedback } = useTelegram();
+  const queryClient = useQueryClient();
 
-  // И ДОБАВИТЬ:
+  // Получение текущих настроек
   const { data: currentSettings } = useQuery({
     queryKey: ['/api/admin/settings/current'],
     queryFn: async () => {
@@ -30,10 +34,6 @@ export default function AdminPage() {
       setMarkupPercentage(currentSettings.markup_percentage || '5');
     }
   }, [currentSettings]);
-  const [markupPercentage, setMarkupPercentage] = useState('5');
-  const { toast } = useToast();
-  const { hapticFeedback } = useTelegram();
-  const queryClient = useQueryClient();
 
   const { data: adminStats } = useQuery({
     queryKey: ['/api/admin/stats'],
@@ -45,26 +45,40 @@ export default function AdminPage() {
 
   const updateSettingsMutation = useMutation({
     mutationFn: async (settings: { starsPrice: string; tonPrice: string; markupPercentage: string }) => {
-      const response = await apiRequest('PUT', '/api/admin/settings', settings);
+      // ✅ ИСПРАВЛЕНО: Конвертируем camelCase в snake_case перед отправкой
+      const backendSettings = {
+        stars_price: parseFloat(settings.starsPrice) || null,
+        ton_price: parseFloat(settings.tonPrice) || null,
+        markup_percentage: parseFloat(settings.markupPercentage) || null,
+      };
+      
+      console.log('🔥 Sending to backend:', backendSettings);
+      
+      const response = await apiRequest('PUT', '/api/admin/settings', backendSettings);
       return response.json();
     },
     onSuccess: () => {
+      hapticFeedback('success');
       toast({
         title: "Настройки обновлены",
         description: "Цены успешно обновлены",
       });
-      setTimeout(() => {
-      window.location.reload();
-      }, 1000);
-      // ✅ Инвалидируй кеш ВЕЗДЕ
+      
+      // ✅ Инвалидируем кеш
       queryClient.invalidateQueries();
       queryClient.invalidateQueries({ queryKey: ['/api/admin/settings/current'] });
       queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
       
-      // ✅ Принудительно обнови ВСЕ запросы
+      // ✅ Принудительно обновляем запросы
       queryClient.refetchQueries({ queryKey: ['/api/admin/settings/current'] });
+      
+      // Перезагружаем страницу через 1 секунду
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('❌ Update settings error:', error);
       hapticFeedback('error');
       toast({
         title: "Ошибка",
@@ -75,6 +89,27 @@ export default function AdminPage() {
   });
 
   const handleUpdatePrices = () => {
+    // Проверяем валидность данных
+    if (!starsPrice || !tonPrice || !markupPercentage) {
+      toast({
+        title: "Ошибка валидации",
+        description: "Все поля должны быть заполнены",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (parseFloat(starsPrice) <= 0 || parseFloat(tonPrice) <= 0 || parseFloat(markupPercentage) < 0) {
+      toast({
+        title: "Ошибка валидации", 
+        description: "Цены должны быть положительными числами",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    console.log('🔥 Frontend sending:', { starsPrice, tonPrice, markupPercentage });
+    
     updateSettingsMutation.mutate({
       starsPrice,
       tonPrice,
@@ -161,6 +196,8 @@ export default function AdminPage() {
                   value={starsPrice}
                   onChange={(e) => setStarsPrice(e.target.value)}
                   step="0.01"
+                  min="0"
+                  placeholder="2.30"
                   className="mt-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20"
                 />
               </div>
@@ -173,6 +210,8 @@ export default function AdminPage() {
                   value={tonPrice}
                   onChange={(e) => setTonPrice(e.target.value)}
                   step="0.01"
+                  min="0"
+                  placeholder="420.50"
                   className="mt-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20"
                 />
               </div>
@@ -185,6 +224,8 @@ export default function AdminPage() {
                   value={markupPercentage}
                   onChange={(e) => setMarkupPercentage(e.target.value)}
                   step="0.1"
+                  min="0"
+                  placeholder="5"
                   className="mt-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20"
                 />
               </div>
