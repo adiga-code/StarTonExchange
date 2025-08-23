@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { 
   Users, Copy, Share, Star, Bell, Palette, History, Receipt, ShoppingCart, 
   ChevronDown, ChevronUp, Target, Gift
-} from "lucide-react";
+} from "@/components/ui/custom-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
