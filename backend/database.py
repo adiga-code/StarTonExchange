@@ -5,7 +5,7 @@ from models import Base
 import os
 
 # Database URL for SQLite
-DATABASE_URL = "sqlite+aiosqlite:///./app.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./app.db")
 
 # Create async engine
 engine = create_async_engine(
