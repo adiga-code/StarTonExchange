@@ -4,26 +4,18 @@ import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTelegram } from "@/hooks/use-telegram";
-import {
-  Shield,
-  BarChart3,
-  Tag,
-  History,
-  Users,
-  DollarSign,
-  Activity,
-  ArrowLeft,
-} from "lucide-react";
+import { Shield, BarChart3, Tag, History, Users, DollarSign, Activity, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 
 /**
- * AdminPage.tsx
+ * Готовый компонент AdminPage
  * - Отправляет payload в snake_case: stars_price, ton_price, markup_percentage
- * - Использует fetch для гарантированной отправки JSON (Content-Type)
- * - Валидация, логирование, блокировка кнопки при отправке
+ * - Преобразует запятые в точки, валидирует числа
+ * - Логирует payload в консоль для удобства отладки
+ * - Не делает window.location.reload(); вместо этого инвалидирует кэш и refetch
  */
 
 type AdminStats = {
@@ -48,13 +40,13 @@ export default function AdminPage(): JSX.Element {
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
 
-  // --- Утилиты ---
+  // --- Helpers ---
   const normalizeToStringNumber = (v: any, fallback = ""): string => {
     if (v === null || v === undefined) return fallback;
     const s = String(v).trim();
     if (!s) return fallback;
     if (s.toLowerCase() === "none") return fallback;
-    // заменяем запятую на точку и проверяем
+    // заменяем запятую на точку, парсим и возвращаем как строку числа
     const n = Number(String(s).replace(",", "."));
     return Number.isFinite(n) ? String(n) : fallback;
   };
@@ -66,12 +58,8 @@ export default function AdminPage(): JSX.Element {
     return Number.isFinite(n) ? n : NaN;
   };
 
-  // --- Получение текущих настроек ---
-  const {
-    data: currentSettings,
-    isLoading: settingsLoading,
-    isError: settingsError,
-  } = useQuery({
+  // --- Запрос текущих настроек ---
+  const { data: currentSettings, isLoading: settingsLoading } = useQuery({
     queryKey: ["/api/admin/settings/current"],
     queryFn: async () => {
       const res = await fetch("/api/admin/settings/current", {
@@ -93,7 +81,7 @@ export default function AdminPage(): JSX.Element {
     setMarkupPercentage(normalizeToStringNumber(currentSettings.markup_percentage, "5"));
   }, [currentSettings]);
 
-  // --- Получение статистики ---
+  // --- Запрос статистики админа ---
   const { data: adminStats } = useQuery({
     queryKey: ["/api/admin/stats"],
     queryFn: async () => {
@@ -109,13 +97,15 @@ export default function AdminPage(): JSX.Element {
     staleTime: 1000 * 30,
   });
 
-  // --- Мутация обновления настроек (используем fetch чтобы точно задать Content-Type) ---
+  // --- Мутация обновления настроек (fetch напрямую, чтобы гарантировать JSON) ---
   const updateSettingsMutation = useMutation({
     mutationFn: async (payload: Record<string, any>) => {
-      console.log("🔥 [mutationFn] sending payload:", payload);
+      console.log("🔥 Sending to backend payload:", payload);
       const res = await fetch("/api/admin/settings", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
@@ -130,7 +120,7 @@ export default function AdminPage(): JSX.Element {
         title: "Настройки обновлены",
         description: "Цены успешно обновлены",
       });
-      // Инвалидируем кэш и рефетчим
+      // инвалидируем и перезапрашиваем нужные данные
       queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
       queryClient.refetchQueries({ queryKey: ["/api/admin/settings/current"] });
@@ -147,9 +137,9 @@ export default function AdminPage(): JSX.Element {
     },
   });
 
-  // --- Обработчик отправки ---
+  // --- Обработчик клика ---
   const handleUpdatePrices = () => {
-    // Быстрая валидация заполнения
+    // Валидация заполнения
     if (!starsPrice || !tonPrice || !markupPercentage) {
       toast({
         title: "Ошибка валидации",
@@ -181,16 +171,16 @@ export default function AdminPage(): JSX.Element {
       return;
     }
 
-    // Формируем payload строго в snake_case (то, что ожидает backend)
+    // Формируем payload в snake_case — только те поля, которые валидны
     const payload: Record<string, number> = {
       stars_price: s,
       ton_price: t,
       markup_percentage: m,
     };
 
-    // Логи для DevTools и сверки с backend-logs
-    console.log("🔥 Frontend prepared payload (snake_case):", payload);
-    // Отправляем
+    // Логируем для отладки (devtools + серверные логи можно сверить)
+    console.log("🔥 Frontend prepared payload:", payload);
+
     updateSettingsMutation.mutate(payload);
   };
 
@@ -238,9 +228,7 @@ export default function AdminPage(): JSX.Element {
                   <DollarSign className="w-4 h-4 mr-1" />
                   Продаж сегодня
                 </span>
-                <span className="font-semibold text-green-500">
-                  ₽{adminStats?.todaySales ?? 0}
-                </span>
+                <span className="font-semibold text-green-500">₽{adminStats?.todaySales ?? 0}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400 flex items-center">
@@ -265,9 +253,7 @@ export default function AdminPage(): JSX.Element {
             </h3>
             <div className="space-y-3">
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">
-                  Цена за звезду (₽)
-                </Label>
+                <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за звезду (₽)</Label>
                 <Input
                   type="text"
                   value={starsPrice}
@@ -326,9 +312,7 @@ export default function AdminPage(): JSX.Element {
                   >
                     <div>
                       <p className="font-medium">{transaction.username}</p>
-                      <p className="text-gray-600 dark:text-gray-400 text-sm">
-                        {transaction.description}
-                      </p>
+                      <p className="text-gray-600 dark:text-gray-400 text-sm">{transaction.description}</p>
                     </div>
                     <div className="text-right">
                       <p
@@ -358,9 +342,7 @@ export default function AdminPage(): JSX.Element {
                   </div>
                 ))
               ) : (
-                <p className="text-gray-500 dark:text-gray-400 text-center py-4">
-                  Транзакций пока нет
-                </p>
+                <p className="text-gray-500 dark:text-gray-400 text-center py-4">Транзакций пока нет</p>
               )}
             </div>
           </motion.div>
