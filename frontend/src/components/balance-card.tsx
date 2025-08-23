@@ -3,8 +3,8 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Star } from "@/components/ui/custom-icons";
-import { Button } from "@/components/ui/button"; // Добавляем Button из вашей UI-библиотеки
-import { useToast } from "@/hooks/use-toast"; // Добавляем useToast для уведомлений
+import ButtonWithdrawal from "./button-withdrawal"; // Обновленный импорт
+import { useToast } from "@/hooks/use-toast";
 import type { SnakeCaseUser } from "@shared/schema";
 
 interface BalanceCardProps {
@@ -12,7 +12,7 @@ interface BalanceCardProps {
 }
 
 export default function BalanceCard({ user }: BalanceCardProps) {
-  const { toast } = useToast(); // Инициализируем хук для уведомлений
+  const { toast } = useToast();
   const starsBalance = user?.stars_balance ?? 0;
 
   // ✅ Получаем актуальные цены из API
@@ -88,18 +88,14 @@ export default function BalanceCard({ user }: BalanceCardProps) {
                 {starsBalance.toLocaleString()} × ₽{starsPrice} за звезду
               </div>
             </div>
-            <Button
+            <ButtonWithdrawal
               onClick={() => {
-                // Здесь можно добавить логику для вывода звезд
                 toast({
                   title: "Вывод",
                   description: "Функция вывода звезд в разработке",
                 });
               }}
-              className="bg-white text-[#4E7FFF] hover:bg-gray-100"
-            >
-              Вывести
-            </Button>
+            />
           </motion.div>
         </div>
       </div>
