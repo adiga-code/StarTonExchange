@@ -11,8 +11,25 @@ import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 
 export default function AdminPage() {
-  const [starsPrice, setStarsPrice] = useState('2.30');
-  const [tonPrice, setTonPrice] = useState('420.50');
+  const [starsPrice, setStarsPrice] = useState('');
+  const [tonPrice, setTonPrice] = useState('');
+
+  // И ДОБАВИТЬ:
+  const { data: currentSettings } = useQuery({
+    queryKey: ['/api/admin/settings/current'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/admin/settings/current');
+      return response.json();
+    },
+  });
+
+  useEffect(() => {
+    if (currentSettings) {
+      setStarsPrice(currentSettings.stars_price || '2.30');
+      setTonPrice(currentSettings.ton_price || '420.50');
+      setMarkupPercentage(currentSettings.markup_percentage || '5');
+    }
+  }, [currentSettings]);
   const [markupPercentage, setMarkupPercentage] = useState('5');
   const { toast } = useToast();
   const { hapticFeedback } = useTelegram();

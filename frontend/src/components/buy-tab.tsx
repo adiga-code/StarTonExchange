@@ -218,10 +218,18 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     }
   };
 
- const prices = {
-   stars: 2.30,
-   ton: 420.50,
- };
+  const { data: adminSettings } = useQuery({
+    queryKey: ['/api/admin/settings/current'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/admin/settings/current');
+      return response.json();
+    },
+  });
+
+  const prices = {
+    stars: adminSettings?.stars_price ? parseFloat(adminSettings.stars_price) : 2.30,
+    ton: adminSettings?.ton_price ? parseFloat(adminSettings.ton_price) : 420.50,
+  };
 
  const quickBuyOptions = selectedCurrency === 'stars'
    ? [100, 500, 1000, 2500]

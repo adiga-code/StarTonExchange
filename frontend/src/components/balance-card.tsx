@@ -9,7 +9,16 @@ interface BalanceCardProps {
 export default function BalanceCard({ user }: BalanceCardProps) {
   const starsBalance = user?.stars_balance || 0;
   // TON balance is not stored locally, only shown for reference
-  const totalRubValue = starsBalance * 2.30;
+  const { data: adminSettings } = useQuery({
+    queryKey: ['/api/admin/settings/current'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/admin/settings/current');
+      return response.json();
+    },
+  });
+
+  const starsPrice = adminSettings?.stars_price ? parseFloat(adminSettings.stars_price) : 2.30;
+  const totalRubValue = starsBalance * starsPrice;
 
   return (
     <motion.div
