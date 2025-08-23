@@ -51,40 +51,41 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
     }
   }, [currentSettings]);
 
-  const updateSettingsMutation = useMutation({
-    mutationFn: async (settings: { 
-      starsPrice: string; 
-      tonPrice: string; 
-      markupPercentage: string;
-      botBaseUrl: string;
-      referralPrefix: string;
-      referralBonusPercentage: string;
-    }) => {
-      const response = await apiRequest('PUT', '/api/admin/settings', {
-        stars_price: settings.starsPrice,
-        ton_price: settings.tonPrice,
-        markup_percentage: settings.markupPercentage,
-        bot_base_url: settings.botBaseUrl,
-        referral_prefix: settings.referralPrefix,
-        referral_bonus_percentage: settings.referralBonusPercentage
-      });
-      return response.json();
-    },
-    onSuccess: () => {
-      toast({
-        title: "Настройки обновлены",
-        description: "Цены успешно обновлены",
-      });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
-    },
-    onError: () => {
-      toast({
-        title: "Ошибка",
-        description: "Не удалось обновить настройки",
-        variant: "destructive",
-      });
-    },
-  });
+    const updateSettingsMutation = useMutation({
+      mutationFn: async (settings: { 
+        starsPrice: string; 
+        tonPrice: string; 
+        markupPercentage: string;
+        botBaseUrl: string;
+        referralPrefix: string;
+        referralBonusPercentage: string;
+      }) => {
+        const response = await apiRequest('PUT', '/api/admin/settings', {
+          stars_price: settings.starsPrice,
+          ton_price: settings.tonPrice,
+          markup_percentage: settings.markupPercentage,
+          bot_base_url: settings.botBaseUrl,
+          referral_prefix: settings.referralPrefix,
+          referral_bonus_percentage: settings.referralBonusPercentage
+        });
+        return response.json();
+      },
+      onSuccess: () => {
+        toast({
+          title: "Настройки обновлены",
+          description: "Цены успешно обновлены",
+        });
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/settings/current'] });
+      },
+      onError: () => {
+        toast({
+          title: "Ошибка",
+          description: "Не удалось обновить настройки",
+          variant: "destructive",
+        });
+      },
+    });
 
   const handleUpdatePrices = () => {
   updateSettingsMutation.mutate({
