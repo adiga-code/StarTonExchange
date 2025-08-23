@@ -190,7 +190,6 @@ export {
   DollarSign,
   Activity,
   ArrowLeft,
-  Share,
   Bell, 
   Palette,Receipt,
   ChevronDown, ChevronUp, Target, Gift
