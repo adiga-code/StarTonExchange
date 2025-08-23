@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Star } from "@/components/ui/custom-icons";
-import ButtonWithdrawal from "./button-withdrawal"; // Обновленный импорт
+import ButtonWithdrawal from "./ui/button-withdrawal"; // Обновленный импорт
 import { useToast } from "@/hooks/use-toast";
 import type { SnakeCaseUser } from "@shared/schema";
 
