@@ -382,6 +382,7 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
               checked={user?.notifications_enabled ?? true}
               onCheckedChange={handleNotificationsToggle}
               disabled={updateUserMutation.isPending}
+              className="data-[state=checked]:bg-[#4E7FFF] data-[state=unchecked]:bg-gray-200 dark:data-[state=unchecked]:bg-gray-700"
             />
           </div>
           
@@ -598,4 +599,4 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
       </motion.div>
     </div>
   );
-} 
+}
