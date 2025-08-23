@@ -84,9 +84,9 @@ export default function BalanceCard({ user }: BalanceCardProps) {
               >
                 ₽{totalRubValue.toLocaleString()}
               </motion.p>
-              <div className="text-xs text-gray-200 mt-1">
+              {/* <div className="text-xs text-gray-200 mt-1">
                 {starsBalance.toLocaleString()} × ₽{starsPrice} за звезду
-              </div>
+              </div> */}
             </div>
             <ButtonWithdrawal
               onClick={() => {
