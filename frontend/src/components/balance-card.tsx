@@ -1,42 +1,53 @@
+import React from "react";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { Star } from "lucide-react";
-import type { SnakeCaseUser, User } from "@shared/schema";
+import type { SnakeCaseUser } from "@shared/schema";
 
 interface BalanceCardProps {
   user?: SnakeCaseUser;
 }
 
 export default function BalanceCard({ user }: BalanceCardProps) {
-  const starsBalance = user?.stars_balance || 0;
-  // TON balance is not stored locally, only shown for reference
+  const starsBalance = user?.stars_balance ?? 0;
+
+  // ✅ Получаем актуальные цены из API
   const { data: adminSettings } = useQuery({
     queryKey: ['/api/admin/settings/current'],
     queryFn: async () => {
       const response = await apiRequest('GET', '/api/admin/settings/current');
       return response.json();
     },
+    staleTime: 5 * 60 * 1000,
   });
 
+  // ✅ Динамический расчет с fallback
   const starsPrice = adminSettings?.stars_price ? parseFloat(adminSettings.stars_price) : 2.30;
   const totalRubValue = starsBalance * starsPrice;
 
   return (
     <motion.div
-      className="p-4 animate-fade-in"
-      initial={{ opacity: 0, y: 20 }}
+      className="mx-4 mb-6"
+      initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
+      transition={{ duration: 0.5 }}
     >
-      <div className="bg-gradient-to-br from-[#4E7FFF]/20 to-purple-500/20 rounded-2xl p-6 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] backdrop-blur-sm border border-white/10 mb-6">
-        <div className="text-center">
-          <p className="text-gray-600 dark:text-gray-400 text-sm mb-2">Ваш баланс</p>
-          <div className="flex items-center justify-center">
-            <motion.div
-              className="text-center"
-              whileHover={{ scale: 1.05 }}
-            >
-              <div className="flex items-center justify-center space-x-2 mb-1">
-                <Star className="w-6 h-6 text-yellow-500" />
+      <div className="bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-2xl p-6 text-white shadow-xl">
+        <motion.h2
+          className="text-lg font-semibold mb-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.1 }}
+        >
+          Мой баланс
+        </motion.h2>
+        
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <Star className="w-6 h-6 text-yellow-300 mr-3" />
+              <div>
                 <motion.span
                   className="text-3xl font-bold"
                   key={starsBalance}
@@ -47,16 +58,17 @@ export default function BalanceCard({ user }: BalanceCardProps) {
                   {starsBalance.toLocaleString()}
                 </motion.span>
               </div>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">Telegram Stars</p>
-            </motion.div>
+              <p className="text-gray-200 text-sm ml-2">Telegram Stars</p>
+            </div>
           </div>
+          
           <motion.div
             className="mt-4 pt-4 border-t border-white/10"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
-            <p className="text-gray-600 dark:text-gray-400 text-xs">Стоимость звезд</p>
+            <p className="text-gray-200 text-xs">Стоимость звезд</p>
             <motion.p
               className="text-lg font-semibold"
               key={totalRubValue}
@@ -66,6 +78,9 @@ export default function BalanceCard({ user }: BalanceCardProps) {
             >
               ₽{totalRubValue.toLocaleString()}
             </motion.p>
+            <div className="text-xs text-gray-200 mt-1">
+              {starsBalance.toLocaleString()} × ₽{starsPrice} за звезду
+            </div>
           </motion.div>
         </div>
       </div>
