@@ -169,7 +169,7 @@ export default function TelegramApp() {
                 </div>
               </div>
             )}
-            {currentTab === 'profile' && <ProfileTab user={currentUser} />}
+            {currentTab === 'profile' && <ProfileTab user={currentUser} onTabChange={handleTabChange} />}
           </motion.div>
         </AnimatePresence>
       </main>

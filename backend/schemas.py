@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 
@@ -63,6 +63,30 @@ class TransactionResponse(BaseModel):
     invoice_id: Optional[str]
     created_at: datetime
     paid_at: Optional[datetime]
+    
+    class Config:
+        from_attributes = True
+
+class TransactionHistoryItem(BaseModel):
+    id: str
+    description: str
+    amount: float
+    currency: str
+    rub_amount: Optional[float] = None
+    status: str
+    status_text: str
+    status_color: str
+    icon_type: str
+    created_at: str
+    created_at_formatted: str
+    
+    class Config:
+        from_attributes = True
+
+class TransactionHistoryResponse(BaseModel):
+    success: bool
+    transactions: List[TransactionHistoryItem]
+    count: int
     
     class Config:
         from_attributes = True

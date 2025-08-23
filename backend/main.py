@@ -134,7 +134,79 @@ async def update_current_user(
     updated_user = await storage.update_user(current_user.id, update_dict)
     return updated_user
 
-
+@app.get("/api/transactions/history")
+async def get_user_transactions_history(
+    current_user: User = Depends(get_authenticated_user),
+    storage: Storage = Depends(get_storage)
+):
+    """Получить историю транзакций пользователя"""
+    try:
+        transactions = await storage.get_transactions_by_user_id(current_user.id)
+        
+        # Преобразуем в нужный формат для фронтенда
+        transaction_history = []
+        for transaction in transactions:
+            # Определяем тип транзакции и иконку
+            transaction_type = "purchase"
+            icon_type = "star" if transaction.currency == "stars" else "ton"
+            
+            # Форматируем описание
+            if transaction.type == "purchase":
+                if transaction.currency == "stars":
+                    description = f"Покупка {int(transaction.amount)} звезд"
+                elif transaction.currency == "ton":
+                    description = f"Покупка {float(transaction.amount)} TON"
+                else:
+                    description = transaction.description or f"Покупка {transaction.currency}"
+            elif transaction.type == "task_reward":
+                description = transaction.description or f"Награда за задание"
+                icon_type = "star"
+            else:
+                description = transaction.description or f"Транзакция {transaction.type}"
+            
+            # Определяем статус на русском
+            status_map = {
+                "completed": "Успешно",
+                "pending": "В обработке",
+                "failed": "Ошибка",
+                "cancelled": "Отменено"
+            }
+            status_text = status_map.get(transaction.status, transaction.status)
+            
+            # Определяем цвет статуса
+            status_color = {
+                "completed": "green",
+                "pending": "yellow", 
+                "failed": "red",
+                "cancelled": "gray"
+            }.get(transaction.status, "gray")
+            
+            transaction_history.append({
+                "id": transaction.id,
+                "description": description,
+                "amount": float(transaction.amount),
+                "currency": transaction.currency,
+                "rub_amount": float(transaction.rub_amount) if transaction.rub_amount else None,
+                "status": transaction.status,
+                "status_text": status_text,
+                "status_color": status_color,
+                "icon_type": icon_type,
+                "created_at": transaction.created_at.isoformat(),
+                "created_at_formatted": transaction.created_at.strftime("%d %b %Y, %H:%M")
+            })
+        
+        # Сортируем по дате создания (новые сверху)
+        transaction_history.sort(key=lambda x: x["created_at"], reverse=True)
+        
+        return {
+            "success": True, 
+            "transactions": transaction_history,
+            "count": len(transaction_history)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting transactions history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get transactions history")
 
 @app.get("/api/getPhoto")
 async def get_photo(username: str):
