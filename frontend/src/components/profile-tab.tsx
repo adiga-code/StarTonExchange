@@ -36,8 +36,16 @@ export default function ProfileTab({ user }: ProfileTabProps) {
     return (first + last).toUpperCase() || user.username?.[0]?.toUpperCase() || 'U';
   };
 
+  const { data: referralConfig } = useQuery({
+    queryKey: ['/api/config/referral'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/config/referral');
+      return response.json();
+    },
+  });
+
   const copyReferralLink = async () => {
-    const referralLink = `https://t.me/starsexchange_bot?start=ref${user?.referral_code || '12345678'}`;
+    const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code || '12345678'}`;
 
     try {
       await navigator.clipboard.writeText(referralLink);
@@ -57,7 +65,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
 
   const shareReferralLink = () => {
     hapticFeedback('medium');
-    shareApp('Попробуй этот крутой обменник Stars и TON! 🚀');
+    shareApp(referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON! 🚀');
   };
   console.log("user", user)
   return (
@@ -132,7 +140,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
         </h3>
 
         <div className="bg-gradient-to-r from-[#4E7FFF]/20 to-purple-500/20 rounded-lg p-4 mb-4 border border-white/10">
-          <p className="font-semibold mb-2">Зарабатывайте 10% с каждой покупки!</p>
+          <p className="font-semibold mb-2">Зарабатывайте {referralConfig?.referral_bonus_percentage || 10}% с каждой покупки!</p>
           <p className="text-gray-600 dark:text-gray-400 text-sm">
             Приглашайте друзей и получайте бонусы за их покупки
           </p>
@@ -145,7 +153,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
             </Label>
             <div className="flex mt-2">
               <Input
-                value={`https://t.me/starsexchange_bot?start=ref${user?.referral_code || '12345678'}`}
+                value={referralConfig ? `${referralConfig.bot_base_url}?start=${referralConfig.referral_prefix}${user?.referral_code || '12345678'}` : 'Загрузка...'}
                 readOnly
                 className="flex-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20 text-sm text-gray-600 dark:text-gray-400"
               />

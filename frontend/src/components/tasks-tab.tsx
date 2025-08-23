@@ -1,4 +1,4 @@
-import { useState } from "react";  // ✅ ДОБАВЛЕН ИМПОРТ
+попрозаimport { useState } from "react";  // ✅ ДОБАВЛЕН ИМПОРТ
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -8,6 +8,14 @@ import { CalendarDays, ThumbsUp, CheckCircle, Share, Users, Star, ShoppingCart, 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { SnakeCaseUser, User } from "@shared/schema";
+
+const { data: interfaceTexts } = useQuery({
+    queryKey: ['/api/config/interface-texts'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/config/interface-texts');
+      return response.json();
+    },
+  });
 
 interface TasksTabProps {
   user?: SnakeCaseUser;
@@ -47,15 +55,16 @@ export default function TasksTab({ user }: TasksTabProps) {
       queryClient.invalidateQueries({ queryKey: ['/api/tasks'] });
       queryClient.invalidateQueries({ queryKey: ['/api/users/me'] });
       hapticFeedback('success');
+      const task = tasks.find(t => t.id === data.taskId);
       toast({
-        title: "Задание выполнено!",
-        description: `Вы получили ${data.reward} звезд`,
+        title: task?.completion_title || "Задание выполнено!",
+        description: task?.completion_text?.replace('{reward}', data.reward.toString()) || `Вы получили ${data.reward} звезд`,
       });
     },
     onError: () => {
       toast({
-        title: "Ошибка",
-        description: "Не удалось выполнить задание",
+        title: interfaceTexts?.error || "Ошибка",
+        description: "Задание не выполнено, попробуйте еще раз",
         variant: "destructive",
       });
     },
@@ -72,8 +81,8 @@ export default function TasksTab({ user }: TasksTabProps) {
       });
     } else {
       toast({
-        title: "Задание не выполнено",
-        description: "Попробуйте еще раз",
+        title: interfaceTexts?.error || "Ошибка",
+        description: "Задание не выполнено, попробуйте еще раз",
         variant: "destructive",
       });
     }
@@ -117,7 +126,7 @@ export default function TasksTab({ user }: TasksTabProps) {
         break;
         
       case 'share_app':
-        shareApp('Попробуй этот крутой обменник Stars и TON!');
+        shareApp(task.share_text || 'Попробуй этот крутой обменник Stars и TON!');
         break;
       case 'invite_friends':
         shareApp(`Попробуй Stars Exchange! ${window.location.origin}?ref=${user?.referralCode}`);

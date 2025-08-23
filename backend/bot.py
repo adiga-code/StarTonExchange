@@ -16,7 +16,7 @@ load_dotenv()
 
 # Bot configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-WEBAPP_URL = os.getenv('WEBAPP_URL', 'https://your-app.com')
+WEBAPP_URL = os.getenv('WEBAPP_URL', 'https://app1.hezh-digital.ru')
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN not found in environment variables")
@@ -202,12 +202,16 @@ async def referrals_command(message: Message):
             await message.answer("❌ Пользователь не найден. Отправьте /start для регистрации.")
             return
         
-        referral_link = f"https://t.me/{(await bot.get_me()).username}?start=ref{db_user.referral_code}"
+        storage_instance = Storage(session)
+        bot_url = await storage_instance.get_cached_setting("bot_base_url")
+        prefix = await storage_instance.get_cached_setting("referral_prefix")
+        referral_link = f"{bot_url}?start={prefix}{db_user.referral_code}"
         
+        bonus_percent = await storage_instance.get_cached_setting("referral_bonus_percentage")
         referrals_text = f"""
 👥 <b>Реферальная программа</b>
 
-💰 <b>Зарабатывайте 10% с каждой покупки друзей!</b>
+💰 <b>Зарабатывайте {bonus_percent}% с каждой покупки друзей!</b>
 
 🔗 <b>Ваша реферальная ссылка:</b>
 <code>{referral_link}</code>

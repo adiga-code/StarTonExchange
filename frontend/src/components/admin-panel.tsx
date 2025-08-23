@@ -14,9 +14,12 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
-  const [starsPrice, setStarsPrice] = useState('2.30');
-  const [tonPrice, setTonPrice] = useState('420.50');
-  const [markupPercentage, setMarkupPercentage] = useState('5');
+  const [starsPrice, setStarsPrice] = useState('');
+  const [tonPrice, setTonPrice] = useState('');
+  const [markupPercentage, setMarkupPercentage] = useState('');
+  const [botBaseUrl, setBotBaseUrl] = useState('');
+  const [referralPrefix, setReferralPrefix] = useState('');
+  const [referralBonusPercentage, setReferralBonusPercentage] = useState('');
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -28,10 +31,43 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
       return response.json();
     },
   });
+  const { data: currentSettings } = useQuery({
+    queryKey: ['/api/admin/settings/current'],
+    enabled: isOpen,
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/admin/settings/current');
+      return response.json();
+    },
+  });
+
+  useEffect(() => {
+    if (currentSettings) {
+      setStarsPrice(currentSettings.stars_price);
+      setTonPrice(currentSettings.ton_price);
+      setMarkupPercentage(currentSettings.markup_percentage);
+      setBotBaseUrl(currentSettings.bot_base_url);
+      setReferralPrefix(currentSettings.referral_prefix);
+      setReferralBonusPercentage(currentSettings.referral_bonus_percentage);
+    }
+  }, [currentSettings]);
 
   const updateSettingsMutation = useMutation({
-    mutationFn: async (settings: { starsPrice: string; tonPrice: string; markupPercentage: string }) => {
-      const response = await apiRequest('PUT', '/api/admin/settings', settings);
+    mutationFn: async (settings: { 
+      starsPrice: string; 
+      tonPrice: string; 
+      markupPercentage: string;
+      botBaseUrl: string;
+      referralPrefix: string;
+      referralBonusPercentage: string;
+    }) => {
+      const response = await apiRequest('PUT', '/api/admin/settings', {
+        stars_price: settings.starsPrice,
+        ton_price: settings.tonPrice,
+        markup_percentage: settings.markupPercentage,
+        bot_base_url: settings.botBaseUrl,
+        referral_prefix: settings.referralPrefix,
+        referral_bonus_percentage: settings.referralBonusPercentage
+      });
       return response.json();
     },
     onSuccess: () => {
@@ -51,12 +87,15 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
   });
 
   const handleUpdatePrices = () => {
-    updateSettingsMutation.mutate({
-      starsPrice,
-      tonPrice,
-      markupPercentage,
-    });
-  };
+  updateSettingsMutation.mutate({
+    starsPrice,
+    tonPrice,
+    markupPercentage,
+    botBaseUrl,
+    referralPrefix,
+    referralBonusPercentage,
+  });
+};
 
   return (
     <AnimatePresence>
@@ -187,7 +226,34 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                   </Button>
                 </div>
               </motion.div>
-
+              {/* Новые поля для реферальной системы */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>URL бота</Label>
+                  <Input
+                    value={botBaseUrl}
+                    onChange={(e) => setBotBaseUrl(e.target.value)}
+                    placeholder="https://t.me/bot_name"
+                  />
+                </div>
+                <div>
+                  <Label>Префикс реферальных ссылок</Label>
+                  <Input
+                    value={referralPrefix}
+                    onChange={(e) => setReferralPrefix(e.target.value)}
+                    placeholder="ref"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Процент реферального бонуса (%)</Label>
+                <Input
+                  type="number"
+                  value={referralBonusPercentage}
+                  onChange={(e) => setReferralBonusPercentage(e.target.value)}
+                  placeholder="10"
+                />
+              </div>
               {/* Recent Transactions */}
               <motion.div 
                 className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"

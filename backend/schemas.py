@@ -91,6 +91,10 @@ class TaskResponse(BaseModel):
     max_completions: Optional[int] = None
     requirements: Optional[str] = None
     completed_count: Optional[int] = 0
+    completion_title: Optional[str] = None
+    completion_text: Optional[str] = None
+    share_text: Optional[str] = None
+    button_text: Optional[str] = None
     
     created_at: datetime
     completed: Optional[bool] = False
@@ -173,6 +177,9 @@ class AdminSettingsUpdate(BaseModel):
     stars_price: Optional[str] = None
     ton_price: Optional[str] = None
     markup_percentage: Optional[str] = None
+    bot_base_url: Optional[str] = None
+    referral_prefix: Optional[str] = None
+    referral_bonus_percentage: Optional[str] = None
 
 # Payment schemas
 class PaymentCreateResponse(BaseModel):

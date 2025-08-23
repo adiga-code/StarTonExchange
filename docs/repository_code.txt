@@ -379,7 +379,7 @@ load_dotenv()
 
 # Bot configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-WEBAPP_URL = os.getenv('WEBAPP_URL', 'https://your-app.com')
+WEBAPP_URL = os.getenv('WEBAPP_URL', 'https://app1.hezh-digital.ru')
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN not found in environment variables")
@@ -476,13 +476,15 @@ async def start_command(message: Message):
 
 🚀 <b>Нажмите кнопку ниже, чтобы начать!</b>
     """
-    
-    await message.answer(
-        welcome_text,
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
-
+    try:
+        await message.answer(
+            welcome_text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except:
+        logger.error("Failed to send welcome message. Check bot permissions and settings.")
+        
 @router.message(F.text == "💰 Баланс")
 async def balance_command(message: Message):
     """Handle balance inquiry"""
@@ -563,12 +565,16 @@ async def referrals_command(message: Message):
             await message.answer("❌ Пользователь не найден. Отправьте /start для регистрации.")
             return
         
-        referral_link = f"https://t.me/{(await bot.get_me()).username}?start=ref{db_user.referral_code}"
+        storage_instance = Storage(session)
+        bot_url = await storage_instance.get_cached_setting("bot_base_url")
+        prefix = await storage_instance.get_cached_setting("referral_prefix")
+        referral_link = f"{bot_url}?start={prefix}{db_user.referral_code}"
         
+        bonus_percent = await storage_instance.get_cached_setting("referral_bonus_percentage")
         referrals_text = f"""
 👥 <b>Реферальная программа</b>
 
-💰 <b>Зарабатывайте 10% с каждой покупки друзей!</b>
+💰 <b>Зарабатывайте {bonus_percent}% с каждой покупки друзей!</b>
 
 🔗 <b>Ваша реферальная ссылка:</b>
 <code>{referral_link}</code>
@@ -615,11 +621,6 @@ async def default_handler(message: Message):
 async def main():
     """Main function to run the bot"""
     try:
-        # Initialize database
-        await init_db()
-        await init_default_data()
-        logger.info("Database initialized")
-        
         # Start polling
         logger.info("Starting bot...")
         await dp.start_polling(bot)
@@ -686,41 +687,60 @@ async def init_default_data():
             Setting(key="stars_price", value="2.30"),
             Setting(key="ton_price", value="420.50"),
             Setting(key="markup_percentage", value="5"),
+            Setting(key="bot_base_url", value="https://t.me/starsexchange_bot"),
+            Setting(key="referral_prefix", value="ref"),
+            Setting(key="referral_bonus_percentage", value="10"),
+            Setting(key="copy_success", value="Ссылка скопирована!"),
+            Setting(key="copy_error", value="Не удалось скопировать ссылку"),
+            Setting(key="loading", value="Загрузка..."),
+            Setting(key="error", value="Ошибка"),
         ]
         
         for setting in default_settings:
             session.add(setting)
         
-        # Initialize default tasks
-        default_tasks = [
-            Task(
-                title="Ежедневный вход",
-                description="Заходите каждый день",
-                reward=10,
-                type="daily",
-                action="daily_login",
-                is_active=True,
-            ),
-            Task(
-                title="Поделиться с другом",
-                description="Пригласите 1 друга",
-                reward=25,
-                type="referral",
-                action="share_app",
-                is_active=True,
-            ),
-            Task(
-                title="Подписаться на канал",
-                description="@starsexchange_news",
-                reward=50,
-                type="social",
-                action="follow_channel",
-                is_active=True,
-            ),
-        ]
-        
-        for task in default_tasks:
-            session.add(task)
+        # Initialize default tasks only if empty
+        existing_tasks = await session.execute(select(Task))
+        if not existing_tasks.first():
+            default_tasks = [
+                Task(
+                    title="Ежедневный вход",
+                    description="Заходите каждый день",
+                    reward=10,
+                    type="daily",
+                    action="daily_login",
+                    is_active=True,
+                    completion_title="Ежедневный вход засчитан!",
+                    completion_text="Вы получили 10 звезд",
+                    button_text="Войти"
+                ),
+                Task(
+                    title="Поделиться с другом",
+                    description="Пригласите 1 друга",
+                    reward=25,
+                    type="referral",
+                    action="share_app",
+                    is_active=True,
+                    completion_title="Друг приглашен!",
+                    completion_text="Вы получили 25 звезд за приглашение",
+                    share_text="Попробуй этот крутой обменник Stars и TON!",
+                    button_text="Пригласить"
+                ),
+                Task(
+                    title="Подписаться на канал",
+                    description="@starsexchange_news",
+                    reward=50,
+                    type="social",
+                    action="follow_channel",
+                    is_active=True,
+                    completion_title="Подписка оформлена!",
+                    completion_text="Вы получили 50 звезд за подписку",
+                    button_text="Подписаться"
+                ),
+            ]
+            
+            for task in default_tasks:
+                session.add(task)
         
         await session.commit()
         print("Default data initialized")
@@ -865,6 +885,7 @@ async def get_photo(username: str):
     logger.info(f"Getting photo for username: {username}")
     
     try:
+        logger.info(f"Getting photo for username: {username}")
         # Добавляем проверку на существование fragment_api_client
         if not hasattr(app.state, 'fragment_api_client') or app.state.fragment_api_client is None:
             logger.warning("Fragment API client not initialized")
@@ -948,16 +969,12 @@ async def calculate_purchase(
         if purchase_data.currency not in ['stars', 'ton']:
             raise HTTPException(status_code=400, detail="Invalid currency. Must be 'stars' or 'ton'")
         
-        stars_price_setting = await storage.get_setting("stars_price")
-        ton_price_setting = await storage.get_setting("ton_price")
-        markup_setting = await storage.get_setting("markup_percentage")
-        
         prices = {
-            "stars": float(stars_price_setting.value if stars_price_setting else "2.30"),
-            "ton": float(ton_price_setting.value if ton_price_setting else "420.50"),
+            "stars": float(await storage.get_cached_setting("stars_price")),
+            "ton": float(await storage.get_cached_setting("ton_price")),
         }
         
-        markup = float(markup_setting.value if markup_setting else "5") / 100
+        markup = float(await storage.get_cached_setting("markup_percentage")) / 100
         
         base_price = purchase_data.amount * prices[purchase_data.currency]
         markup_amount = base_price * markup
@@ -1185,12 +1202,23 @@ async def get_referral_stats(
         
         referral_list = []
         for r in referrals:
-            referral_list.append({
-                "id": r.id,
-                "username": r.username,
-                "first_name": r.first_name,
-                "created_at": r.created_at.isoformat()
-            })
+            # Безопасное получение атрибутов с проверкой типа
+            if isinstance(r, dict):
+                # Если r - это словарь
+                referral_list.append({
+                    "id": r.get("id"),
+                    "username": r.get("username"),
+                    "first_name": r.get("first_name"),
+                    "created_at": r.get("created_at").isoformat() if r.get("created_at") else None
+                })
+            else:
+                # Если r - это объект User из SQLAlchemy
+                referral_list.append({
+                    "id": r.id,
+                    "username": getattr(r, 'username', None),  # Безопасное получение атрибута
+                    "first_name": getattr(r, 'first_name', None),
+                    "created_at": r.created_at.isoformat() if hasattr(r, 'created_at') and r.created_at else None
+                })
         
         return ReferralStats(
             total_referrals=len(referrals),
@@ -1199,7 +1227,7 @@ async def get_referral_stats(
             referrals=referral_list
         )
     except Exception as e:
-        logger.error(f"Error getting referral stats: {e}")
+        logger.error(f"Error getting referral stats: {e}", exc_info=True)  # Добавляем полный traceback
         raise HTTPException(status_code=500, detail="Failed to get referral stats")
 
 # Payment webhook and status routes
@@ -1356,7 +1384,7 @@ async def get_admin_stats(storage: Storage = Depends(get_storage)):
             user = next((u for u in users if u.id == t.user_id), None)
             recent_transactions.append({
                 "id": t.id,
-                "username": user.username if user else "Unknown",
+                "username": user.get("username") if isinstance(user, dict) else (user.username if user else "Unknown"),
                 "description": t.description,
                 "status": t.status,
                 "created_at": t.created_at.isoformat()
@@ -1384,6 +1412,12 @@ async def update_admin_settings(
             await storage.update_setting("ton_price", settings.ton_price)
         if settings.markup_percentage:
             await storage.update_setting("markup_percentage", settings.markup_percentage)
+        if settings.bot_base_url:
+            await storage.update_setting("bot_base_url", settings.bot_base_url)
+        if settings.referral_prefix:
+            await storage.update_setting("referral_prefix", settings.referral_prefix)
+        if settings.referral_bonus_percentage:
+            await storage.update_setting("referral_bonus_percentage", settings.referral_bonus_percentage)
         
         return {"success": True}
     except Exception as e:
@@ -1561,6 +1595,34 @@ async def delete_task_admin(
     await storage.update_task(task_id, {"status": "expired", "is_active": False})
     return {"success": True}
 
+@app.get("/api/admin/settings/current")
+async def get_admin_settings(storage: Storage = Depends(get_storage)):
+    return {
+        "stars_price": await storage.get_cached_setting("stars_price"),
+        "ton_price": await storage.get_cached_setting("ton_price"),
+        "markup_percentage": await storage.get_cached_setting("markup_percentage"),
+        "bot_base_url": await storage.get_cached_setting("bot_base_url"),
+        "referral_prefix": await storage.get_cached_setting("referral_prefix"),
+        "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage")
+    }
+
+@app.get("/api/config/referral")
+async def get_referral_config(storage: Storage = Depends(get_storage)):
+    return {
+        "bot_base_url": await storage.get_cached_setting("bot_base_url"),
+        "referral_prefix": await storage.get_cached_setting("referral_prefix"),
+        "referral_bonus_percentage": int(await storage.get_cached_setting("referral_bonus_percentage"))
+    }
+
+@app.get("/api/config/interface-texts")
+async def get_interface_texts(storage: Storage = Depends(get_storage)):
+    return {
+        "copy_success": await storage.get_cached_setting("copy_success"),
+        "copy_error": await storage.get_cached_setting("copy_error"),
+        "loading": await storage.get_cached_setting("loading"),
+        "error": await storage.get_cached_setting("error")
+    }
+
 # Функция уведомлений (заглушка)
 async def notify_users_new_task(task):
     """Уведомление пользователей о новом задании"""
@@ -1581,27 +1643,44 @@ if not os.getenv("DEVELOPMENT"):
 async def startup_event():
     await init_db()
     await init_default_data()
+    logger.info("Database initialized")
+    # Инициализация Fragment API клиента
+    logger.info("Starting Fragment API initialization...")
+        # Диагностика переменных окружения
+    fragment_seed = os.getenv("FRAGMENT_SEED")
+    fragment_cookies = os.getenv("FRAGMENT_COOKIE")
     
-    # Правильная инициализация Fragment API клиента
+    logger.info(f"FRAGMENT_SEED length: {len(fragment_seed) if fragment_seed else 'None'}")
+    logger.info(f"FRAGMENT_COOKIE length: {len(fragment_cookies) if fragment_cookies else 'None'}")
+    
     try:
         fragment_seed = os.getenv("FRAGMENT_SEED")
         fragment_cookies = os.getenv("FRAGMENT_COOKIE")
         
+        logger.info(f"Fragment seed exists: {bool(fragment_seed)}")
+        logger.info(f"Fragment cookies exist: {bool(fragment_cookies)}")
+         
         if fragment_seed and fragment_cookies:
+            logger.info("Creating Fragment API client...")
             app.state.fragment_api_client = AsyncFragmentAPIClient(
                 seed=fragment_seed,
                 fragment_cookies=fragment_cookies
             )
             logger.info("Fragment API client initialized successfully")
+              
+            balance = await app.state.fragment_api_client.get_balance()
+            logger.info(f"Fragment API balance: {balance}")
         else:
             logger.warning("Fragment API credentials not found, client not initialized")
             app.state.fragment_api_client = None
             
     except Exception as e:
-        logger.error(f"Failed to initialize Fragment API client: {e}")
+        logger.error(f"Failed to initialize Fragment API client: {e}", exc_info=True)
         app.state.fragment_api_client = None
+    # from bot import main as bot_main
+    # # Запуск бота в фоновом режиме
+    # await bot_main()
     
-    logger.info("Database initialized")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -1702,6 +1781,10 @@ class Task(Base):
     type = Column(String, nullable=False)  # 'daily', 'social', 'referral'
     action = Column(String, nullable=True)  # 'daily_login', 'share_app', etc.
     is_active = Column(Boolean, default=True)
+    completion_title = Column(String, nullable=True)
+    completion_text = Column(String, nullable=True)
+    share_text = Column(String, nullable=True)
+    button_text = Column(String, nullable=True)
     
     # ✅ ДОБАВИТЬ ЭТИ ПОЛЯ:
     status = Column(String, default="active")  # 'draft', 'active', 'paused', 'expired'
@@ -2017,6 +2100,10 @@ class TaskResponse(BaseModel):
     max_completions: Optional[int] = None
     requirements: Optional[str] = None
     completed_count: Optional[int] = 0
+    completion_title: Optional[str] = None
+    completion_text: Optional[str] = None
+    share_text: Optional[str] = None
+    button_text: Optional[str] = None
     
     created_at: datetime
     completed: Optional[bool] = False
@@ -2099,6 +2186,9 @@ class AdminSettingsUpdate(BaseModel):
     stars_price: Optional[str] = None
     ton_price: Optional[str] = None
     markup_percentage: Optional[str] = None
+    bot_base_url: Optional[str] = None
+    referral_prefix: Optional[str] = None
+    referral_bonus_percentage: Optional[str] = None
 
 # Payment schemas
 class PaymentCreateResponse(BaseModel):
@@ -2131,11 +2221,12 @@ from typing import Optional, List
 from datetime import datetime
 import random
 import string
+from cachetools import TTLCache
 
 class Storage:
     def __init__(self, db: AsyncSession):
         self.db = db
-
+        self._settings_cache = TTLCache(maxsize=100, ttl=3600)
     # User methods
     async def get_user(self, user_id: str) -> Optional[User]:
         result = await self.db.execute(select(User).where(User.id == user_id))
@@ -2178,8 +2269,29 @@ class Storage:
         return await self.get_user(user_id)
 
     async def get_all_users(self) -> List[User]:
-        result = await self.db.execute(select(User))
-        return result.scalars().all()
+        """Получить всех пользователей из базы данных"""
+        try:
+            result = await self.db.execute(select(User))
+            users = result.scalars().all()
+            
+            # Убедимся, что возвращаем список объектов User
+            # Проверяем, что каждый элемент - это объект User
+            validated_users = []
+            for user in users:
+                if isinstance(user, User):
+                    validated_users.append(user)
+                else:
+                    # Если по какой-то причине получили не объект User, логируем
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Unexpected type in get_all_users: {type(user)}")
+            
+            return validated_users
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in get_all_users: {e}", exc_info=True)
+            raise
 
     # Transaction methods
     async def get_transaction(self, transaction_id: str) -> Optional[Transaction]:
@@ -2413,6 +2525,35 @@ class Storage:
             .values(completed_count=Task.completed_count + 1)
         )
         await self.db.commit()
+
+    async def get_cached_setting(self, key: str) -> str:
+        if key in self._settings_cache:
+            return self._settings_cache[key]
+            
+        setting = await self.get_setting(key)
+        value = setting.value if setting else ""
+        self._settings_cache[key] = value
+        return value
+    
+    async def update_setting(self, key: str, value: str):
+        # Найти или создать setting
+        result = await self.session.execute(
+            select(Setting).where(Setting.key == key)
+        )
+        setting = result.scalar_one_or_none()
+        
+        if setting:
+            setting.value = value
+            setting.updated_at = datetime.utcnow()
+        else:
+            setting = Setting(key=key, value=value)
+            self.session.add(setting)
+        
+        await self.session.commit()
+        
+        # Инвалидировать кэш
+        if key in self._settings_cache:
+            del self._settings_cache[key]
 
 ================================================================================
 FILE: backend\telegram_auth.py
@@ -3998,9 +4139,12 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
-  const [starsPrice, setStarsPrice] = useState('2.30');
-  const [tonPrice, setTonPrice] = useState('420.50');
-  const [markupPercentage, setMarkupPercentage] = useState('5');
+  const [starsPrice, setStarsPrice] = useState('');
+  const [tonPrice, setTonPrice] = useState('');
+  const [markupPercentage, setMarkupPercentage] = useState('');
+  const [botBaseUrl, setBotBaseUrl] = useState('');
+  const [referralPrefix, setReferralPrefix] = useState('');
+  const [referralBonusPercentage, setReferralBonusPercentage] = useState('');
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -4012,10 +4156,43 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
       return response.json();
     },
   });
+  const { data: currentSettings } = useQuery({
+    queryKey: ['/api/admin/settings/current'],
+    enabled: isOpen,
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/admin/settings/current');
+      return response.json();
+    },
+  });
+
+  useEffect(() => {
+    if (currentSettings) {
+      setStarsPrice(currentSettings.stars_price);
+      setTonPrice(currentSettings.ton_price);
+      setMarkupPercentage(currentSettings.markup_percentage);
+      setBotBaseUrl(currentSettings.bot_base_url);
+      setReferralPrefix(currentSettings.referral_prefix);
+      setReferralBonusPercentage(currentSettings.referral_bonus_percentage);
+    }
+  }, [currentSettings]);
 
   const updateSettingsMutation = useMutation({
-    mutationFn: async (settings: { starsPrice: string; tonPrice: string; markupPercentage: string }) => {
-      const response = await apiRequest('PUT', '/api/admin/settings', settings);
+    mutationFn: async (settings: { 
+      starsPrice: string; 
+      tonPrice: string; 
+      markupPercentage: string;
+      botBaseUrl: string;
+      referralPrefix: string;
+      referralBonusPercentage: string;
+    }) => {
+      const response = await apiRequest('PUT', '/api/admin/settings', {
+        stars_price: settings.starsPrice,
+        ton_price: settings.tonPrice,
+        markup_percentage: settings.markupPercentage,
+        bot_base_url: settings.botBaseUrl,
+        referral_prefix: settings.referralPrefix,
+        referral_bonus_percentage: settings.referralBonusPercentage
+      });
       return response.json();
     },
     onSuccess: () => {
@@ -4035,12 +4212,15 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
   });
 
   const handleUpdatePrices = () => {
-    updateSettingsMutation.mutate({
-      starsPrice,
-      tonPrice,
-      markupPercentage,
-    });
-  };
+  updateSettingsMutation.mutate({
+    starsPrice,
+    tonPrice,
+    markupPercentage,
+    botBaseUrl,
+    referralPrefix,
+    referralBonusPercentage,
+  });
+};
 
   return (
     <AnimatePresence>
@@ -4171,7 +4351,34 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                   </Button>
                 </div>
               </motion.div>
-
+              {/* Новые поля для реферальной системы */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>URL бота</Label>
+                  <Input
+                    value={botBaseUrl}
+                    onChange={(e) => setBotBaseUrl(e.target.value)}
+                    placeholder="https://t.me/bot_name"
+                  />
+                </div>
+                <div>
+                  <Label>Префикс реферальных ссылок</Label>
+                  <Input
+                    value={referralPrefix}
+                    onChange={(e) => setReferralPrefix(e.target.value)}
+                    placeholder="ref"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Процент реферального бонуса (%)</Label>
+                <Input
+                  type="number"
+                  value={referralBonusPercentage}
+                  onChange={(e) => setReferralBonusPercentage(e.target.value)}
+                  placeholder="10"
+                />
+              </div>
               {/* Recent Transactions */}
               <motion.div 
                 className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
@@ -4318,6 +4525,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SnakeCaseUser, User } from "@shared/schema";
+import { PaymentMethodModal } from "@/components/payment-method-modal";
 
 interface BuyTabProps {
  user?: SnakeCaseUser;
@@ -4347,6 +4555,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
  const { hapticFeedback } = useTelegram();
  const queryClient = useQueryClient();
  const timeoutRef = useRef<NodeJS.Timeout>();
+ const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
  const fetchUserPhoto = async (username: string) => {
    setIsLoadingPhoto(true);
@@ -4503,22 +4712,27 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
    setAmount(quickAmount.toString());
  };
 
- const handlePurchase = async () => {
-   if (!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing || !recipientUsername.trim()) return;
+  const handleOpenPaymentModal = () => {
+    if (!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing || !recipientUsername.trim()) return;
+    hapticFeedback('light');
+    setIsPaymentModalOpen(true);
+  };
 
-   hapticFeedback('medium');
+  const handleSBPPayment = async () => {
+    setIsPaymentModalOpen(false);
+    hapticFeedback('medium');
 
-   try {
-     await purchaseMutation.mutateAsync({
-       currency: selectedCurrency,
-       amount: parseFloat(amount),
-       rub_amount: parseFloat(priceCalculation.total_price),
-       username: userPhoto ? recipientUsername : undefined,
-     });
-   } catch (error) {
-     // Error handling is done in onError callback
-   }
- };
+    try {
+      await purchaseMutation.mutateAsync({
+        currency: selectedCurrency,
+        amount: parseFloat(amount),
+        rub_amount: parseFloat(priceCalculation?.total_price || '0'),
+        username: userPhoto ? recipientUsername : undefined,
+      });
+    } catch (error) {
+      // Error handling is done in onError callback
+    }
+  };
 
  const prices = {
    stars: 2.30,
@@ -4711,7 +4925,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
 
          {/* Purchase Button */}
          <Button
-           onClick={handlePurchase}
+           onClick={handleOpenPaymentModal}
            disabled={!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing || !recipientUsername.trim()}
            className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white font-semibold py-3 transition-all disabled:opacity-50"
            size="lg"
@@ -4729,7 +4943,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
            ) : (
              <>
                <ExternalLink className="w-4 h-4 mr-2" />
-               Перейти к оплате
+               Выбрать способ оплаты
              </>
            )}
          </Button>
@@ -4766,6 +4980,14 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
          ))}
        </div>
      </motion.div>
+     
+     {/* Payment Method Modal */}
+     <PaymentMethodModal
+       isOpen={isPaymentModalOpen}
+       onClose={() => setIsPaymentModalOpen(false)}
+       onSelectSBP={handleSBPPayment}
+       isLoading={purchaseMutation.isPending || isProcessing}
+     />
    </div>
  );
 }
@@ -4826,6 +5048,95 @@ export default function LoadingModal({ isOpen, message = "Загрузка..." }
 
 
 ================================================================================
+FILE: frontend\src\components\payment-method-modal.tsx
+================================================================================
+
+import React from 'react';
+import { motion } from 'framer-motion';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Smartphone, CreditCard, Bitcoin, ArrowLeft } from 'lucide-react';
+
+interface PaymentMethodModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSelectSBP: () => void;
+  isLoading?: boolean;
+}
+
+export function PaymentMethodModal({ isOpen, onClose, onSelectSBP, isLoading = false }: PaymentMethodModalProps) {
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-md bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/10">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-semibold text-center">
+            Выберите способ оплаты
+          </DialogTitle>
+        </DialogHeader>
+        
+        <div className="space-y-3 mt-4">
+          {/* СБП */}
+          <motion.button
+            onClick={onSelectSBP}
+            disabled={isLoading}
+            className="w-full p-4 rounded-xl border-2 border-[#4E7FFF] bg-[#4E7FFF]/10 hover:bg-[#4E7FFF]/20 transition-all flex items-center space-x-4"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <div className="w-12 h-12 bg-[#4E7FFF] rounded-lg flex items-center justify-center">
+              <Smartphone className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1 text-left">
+              <h3 className="font-semibold">Система быстрых платежей</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Мгновенный перевод через банк</p>
+            </div>
+          </motion.button>
+
+          {/* Банковская карта */}
+          <motion.div
+            className="w-full p-4 rounded-xl border-2 border-gray-300 dark:border-white/20 bg-gray-100 dark:bg-gray-800/50 opacity-60 flex items-center space-x-4"
+            whileHover={{ scale: 1.01 }}
+          >
+            <div className="w-12 h-12 bg-gray-400 rounded-lg flex items-center justify-center">
+              <CreditCard className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1 text-left">
+              <h3 className="font-semibold">Банковская карта</h3>
+              <p className="text-sm text-gray-500">Скоро будет доступно</p>
+            </div>
+          </motion.div>
+
+          {/* Криптовалюта */}
+          <motion.div
+            className="w-full p-4 rounded-xl border-2 border-gray-300 dark:border-white/20 bg-gray-100 dark:bg-gray-800/50 opacity-60 flex items-center space-x-4"
+            whileHover={{ scale: 1.01 }}
+          >
+            <div className="w-12 h-12 bg-gray-400 rounded-lg flex items-center justify-center">
+              <Bitcoin className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1 text-left">
+              <h3 className="font-semibold">Криптовалюта</h3>
+              <p className="text-sm text-gray-500">Скоро будет доступно</p>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* Кнопка назад */}
+        <Button
+          variant="outline"
+          onClick={onClose}
+          className="w-full mt-4"
+          disabled={isLoading}
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Назад
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+================================================================================
 FILE: frontend\src\components\profile-tab.tsx
 ================================================================================
 
@@ -4867,8 +5178,16 @@ export default function ProfileTab({ user }: ProfileTabProps) {
     return (first + last).toUpperCase() || user.username?.[0]?.toUpperCase() || 'U';
   };
 
+  const { data: referralConfig } = useQuery({
+    queryKey: ['/api/config/referral'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/config/referral');
+      return response.json();
+    },
+  });
+
   const copyReferralLink = async () => {
-    const referralLink = `https://t.me/starsexchange_bot?start=ref${user?.referral_code || '12345678'}`;
+    const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code || '12345678'}`;
 
     try {
       await navigator.clipboard.writeText(referralLink);
@@ -4888,7 +5207,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
 
   const shareReferralLink = () => {
     hapticFeedback('medium');
-    shareApp('Попробуй этот крутой обменник Stars и TON! 🚀');
+    shareApp(referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON! 🚀');
   };
   console.log("user", user)
   return (
@@ -4963,7 +5282,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
         </h3>
 
         <div className="bg-gradient-to-r from-[#4E7FFF]/20 to-purple-500/20 rounded-lg p-4 mb-4 border border-white/10">
-          <p className="font-semibold mb-2">Зарабатывайте 10% с каждой покупки!</p>
+          <p className="font-semibold mb-2">Зарабатывайте {referralConfig?.referral_bonus_percentage || 10}% с каждой покупки!</p>
           <p className="text-gray-600 dark:text-gray-400 text-sm">
             Приглашайте друзей и получайте бонусы за их покупки
           </p>
@@ -4976,7 +5295,7 @@ export default function ProfileTab({ user }: ProfileTabProps) {
             </Label>
             <div className="flex mt-2">
               <Input
-                value={`https://t.me/starsexchange_bot?start=ref${user?.referral_code || '12345678'}`}
+                value={referralConfig ? `${referralConfig.bot_base_url}?start=${referralConfig.referral_prefix}${user?.referral_code || '12345678'}` : 'Загрузка...'}
                 readOnly
                 className="flex-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20 text-sm text-gray-600 dark:text-gray-400"
               />
@@ -5536,7 +5855,7 @@ export default TaskAdminPage;
 FILE: frontend\src\components\tasks-tab.tsx
 ================================================================================
 
-import { useState } from "react";  // ✅ ДОБАВЛЕН ИМПОРТ
+попрозаimport { useState } from "react";  // ✅ ДОБАВЛЕН ИМПОРТ
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -5546,6 +5865,14 @@ import { CalendarDays, ThumbsUp, CheckCircle, Share, Users, Star, ShoppingCart, 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { SnakeCaseUser, User } from "@shared/schema";
+
+const { data: interfaceTexts } = useQuery({
+    queryKey: ['/api/config/interface-texts'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/config/interface-texts');
+      return response.json();
+    },
+  });
 
 interface TasksTabProps {
   user?: SnakeCaseUser;
@@ -5585,15 +5912,16 @@ export default function TasksTab({ user }: TasksTabProps) {
       queryClient.invalidateQueries({ queryKey: ['/api/tasks'] });
       queryClient.invalidateQueries({ queryKey: ['/api/users/me'] });
       hapticFeedback('success');
+      const task = tasks.find(t => t.id === data.taskId);
       toast({
-        title: "Задание выполнено!",
-        description: `Вы получили ${data.reward} звезд`,
+        title: task?.completion_title || "Задание выполнено!",
+        description: task?.completion_text?.replace('{reward}', data.reward.toString()) || `Вы получили ${data.reward} звезд`,
       });
     },
     onError: () => {
       toast({
-        title: "Ошибка",
-        description: "Не удалось выполнить задание",
+        title: interfaceTexts?.error || "Ошибка",
+        description: "Задание не выполнено, попробуйте еще раз",
         variant: "destructive",
       });
     },
@@ -5610,8 +5938,8 @@ export default function TasksTab({ user }: TasksTabProps) {
       });
     } else {
       toast({
-        title: "Задание не выполнено",
-        description: "Попробуйте еще раз",
+        title: interfaceTexts?.error || "Ошибка",
+        description: "Задание не выполнено, попробуйте еще раз",
         variant: "destructive",
       });
     }
@@ -5655,7 +5983,7 @@ export default function TasksTab({ user }: TasksTabProps) {
         break;
         
       case 'share_app':
-        shareApp('Попробуй этот крутой обменник Stars и TON!');
+        shareApp(task.share_text || 'Попробуй этот крутой обменник Stars и TON!');
         break;
       case 'invite_friends':
         shareApp(`Попробуй Stars Exchange! ${window.location.origin}?ref=${user?.referralCode}`);

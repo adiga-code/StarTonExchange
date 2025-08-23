@@ -7,11 +7,12 @@ from typing import Optional, List
 from datetime import datetime
 import random
 import string
+from cachetools import TTLCache
 
 class Storage:
     def __init__(self, db: AsyncSession):
         self.db = db
-
+        self._settings_cache = TTLCache(maxsize=100, ttl=3600)
     # User methods
     async def get_user(self, user_id: str) -> Optional[User]:
         result = await self.db.execute(select(User).where(User.id == user_id))
@@ -310,3 +311,32 @@ class Storage:
             .values(completed_count=Task.completed_count + 1)
         )
         await self.db.commit()
+
+    async def get_cached_setting(self, key: str) -> str:
+        if key in self._settings_cache:
+            return self._settings_cache[key]
+            
+        setting = await self.get_setting(key)
+        value = setting.value if setting else ""
+        self._settings_cache[key] = value
+        return value
+    
+    async def update_setting(self, key: str, value: str):
+        # Найти или создать setting
+        result = await self.session.execute(
+            select(Setting).where(Setting.key == key)
+        )
+        setting = result.scalar_one_or_none()
+        
+        if setting:
+            setting.value = value
+            setting.updated_at = datetime.utcnow()
+        else:
+            setting = Setting(key=key, value=value)
+            self.session.add(setting)
+        
+        await self.session.commit()
+        
+        # Инвалидировать кэш
+        if key in self._settings_cache:
+            del self._settings_cache[key]

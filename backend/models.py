@@ -66,6 +66,10 @@ class Task(Base):
     type = Column(String, nullable=False)  # 'daily', 'social', 'referral'
     action = Column(String, nullable=True)  # 'daily_login', 'share_app', etc.
     is_active = Column(Boolean, default=True)
+    completion_title = Column(String, nullable=True)
+    completion_text = Column(String, nullable=True)
+    share_text = Column(String, nullable=True)
+    button_text = Column(String, nullable=True)
     
     # ✅ ДОБАВИТЬ ЭТИ ПОЛЯ:
     status = Column(String, default="active")  # 'draft', 'active', 'paused', 'expired'

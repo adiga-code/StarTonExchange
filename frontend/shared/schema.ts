@@ -53,7 +53,10 @@ export const tasks = pgTable("tasks", {
   maxCompletions: integer("max_completions"), // максимум выполнений (опционально)
   requirements: text("requirements"), // требования в JSON формате (опционально)
   completedCount: integer("completed_count").default(0), // счетчик выполнений
-  
+  completionTitle: text("completion_title"),
+  completionText: text("completion_text"),
+  shareText: text("share_text"),
+  buttonText: text("button_text"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

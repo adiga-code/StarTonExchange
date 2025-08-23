@@ -218,16 +218,12 @@ async def calculate_purchase(
         if purchase_data.currency not in ['stars', 'ton']:
             raise HTTPException(status_code=400, detail="Invalid currency. Must be 'stars' or 'ton'")
         
-        stars_price_setting = await storage.get_setting("stars_price")
-        ton_price_setting = await storage.get_setting("ton_price")
-        markup_setting = await storage.get_setting("markup_percentage")
-        
         prices = {
-            "stars": float(stars_price_setting.value if stars_price_setting else "2.30"),
-            "ton": float(ton_price_setting.value if ton_price_setting else "420.50"),
+            "stars": float(await storage.get_cached_setting("stars_price")),
+            "ton": float(await storage.get_cached_setting("ton_price")),
         }
         
-        markup = float(markup_setting.value if markup_setting else "5") / 100
+        markup = float(await storage.get_cached_setting("markup_percentage")) / 100
         
         base_price = purchase_data.amount * prices[purchase_data.currency]
         markup_amount = base_price * markup
@@ -665,6 +661,12 @@ async def update_admin_settings(
             await storage.update_setting("ton_price", settings.ton_price)
         if settings.markup_percentage:
             await storage.update_setting("markup_percentage", settings.markup_percentage)
+        if settings.bot_base_url:
+            await storage.update_setting("bot_base_url", settings.bot_base_url)
+        if settings.referral_prefix:
+            await storage.update_setting("referral_prefix", settings.referral_prefix)
+        if settings.referral_bonus_percentage:
+            await storage.update_setting("referral_bonus_percentage", settings.referral_bonus_percentage)
         
         return {"success": True}
     except Exception as e:
@@ -841,6 +843,34 @@ async def delete_task_admin(
     
     await storage.update_task(task_id, {"status": "expired", "is_active": False})
     return {"success": True}
+
+@app.get("/api/admin/settings/current")
+async def get_admin_settings(storage: Storage = Depends(get_storage)):
+    return {
+        "stars_price": await storage.get_cached_setting("stars_price"),
+        "ton_price": await storage.get_cached_setting("ton_price"),
+        "markup_percentage": await storage.get_cached_setting("markup_percentage"),
+        "bot_base_url": await storage.get_cached_setting("bot_base_url"),
+        "referral_prefix": await storage.get_cached_setting("referral_prefix"),
+        "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage")
+    }
+
+@app.get("/api/config/referral")
+async def get_referral_config(storage: Storage = Depends(get_storage)):
+    return {
+        "bot_base_url": await storage.get_cached_setting("bot_base_url"),
+        "referral_prefix": await storage.get_cached_setting("referral_prefix"),
+        "referral_bonus_percentage": int(await storage.get_cached_setting("referral_bonus_percentage"))
+    }
+
+@app.get("/api/config/interface-texts")
+async def get_interface_texts(storage: Storage = Depends(get_storage)):
+    return {
+        "copy_success": await storage.get_cached_setting("copy_success"),
+        "copy_error": await storage.get_cached_setting("copy_error"),
+        "loading": await storage.get_cached_setting("loading"),
+        "error": await storage.get_cached_setting("error")
+    }
 
 # Функция уведомлений (заглушка)
 async def notify_users_new_task(task):
