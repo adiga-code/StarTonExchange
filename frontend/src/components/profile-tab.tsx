@@ -378,12 +378,22 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
               <Bell className="w-4 h-4 text-gray-500" />
               <Label>Уведомления</Label>
             </div>
-            <Switch
-              checked={user?.notifications_enabled ?? true}
-              onCheckedChange={handleNotificationsToggle}
+            <button
+              onClick={() => handleNotificationsToggle(!(user?.notifications_enabled ?? true))}
               disabled={updateUserMutation.isPending}
-              className="data-[state=checked]:bg-[#4E7FFF] data-[state=unchecked]:bg-gray-200 dark:data-[state=unchecked]:bg-gray-700"
-            />
+              className={`
+                relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+                ${user?.notifications_enabled ?? true ? 'bg-[#4E7FFF]' : 'bg-gray-300 dark:bg-gray-600'}
+                ${updateUserMutation.isPending ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+              `}
+            >
+              <span
+                className={`
+                  inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                  ${user?.notifications_enabled ?? true ? 'translate-x-6' : 'translate-x-1'}
+                `}
+              />
+            </button>
           </div>
           
           {/* Индикатор загрузки */}
