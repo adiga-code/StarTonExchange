@@ -53,12 +53,12 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
 
   useEffect(() => {
     if (currentSettings) {
-      setStarsPrice(currentSettings.stars_price);
-      setTonPrice(currentSettings.ton_price);
-      setMarkupPercentage(currentSettings.markup_percentage);
-      setBotBaseUrl(currentSettings.bot_base_url);
-      setReferralPrefix(currentSettings.referral_prefix);
-      setReferralBonusPercentage(currentSettings.referral_bonus_percentage);
+      setStarsPrice(currentSettings.stars_price || "");
+      setTonPrice(currentSettings.ton_price || "");
+      setMarkupPercentage(currentSettings.markup_percentage || "");
+      setBotBaseUrl(currentSettings.bot_base_url || "");
+      setReferralPrefix(currentSettings.referral_prefix || "");
+      setReferralBonusPercentage(currentSettings.referral_bonus_percentage || "");
     }
   }, [currentSettings]);
 
@@ -87,9 +87,7 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
         description: "Цены успешно обновлены",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-      queryClient.invalidateQueries({
-        queryKey: ["/api/admin/settings/current"],
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
     },
     onError: () => {
       toast({
@@ -353,4 +351,3 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
     </AnimatePresence>
   );
 }
- 
