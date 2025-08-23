@@ -1,4 +1,4 @@
-import { useState } from "react";  // ✅ ДОБАВЛЕН ИМПОРТ
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -8,14 +8,6 @@ import { CalendarDays, ThumbsUp, CheckCircle, Share, Users, Star, ShoppingCart, 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { SnakeCaseUser, User } from "@shared/schema";
-
-const { data: interfaceTexts } = useQuery({
-    queryKey: ['/api/config/interface-texts'],
-    queryFn: async () => {
-      const response = await apiRequest('GET', '/api/config/interface-texts');
-      return response.json();
-    },
-  });
 
 interface TasksTabProps {
   user?: SnakeCaseUser;
@@ -30,6 +22,10 @@ interface TaskWithCompletion {
   action?: string;
   completed: boolean;
   completedAt?: string | null;
+  completion_title?: string;
+  completion_text?: string;
+  share_text?: string;
+  button_text?: string;
 }
 
 export default function TasksTab({ user }: TasksTabProps) {
@@ -37,6 +33,15 @@ export default function TasksTab({ user }: TasksTabProps) {
   const { hapticFeedback, shareApp } = useTelegram();
   const queryClient = useQueryClient();
   const [openedTasks, setOpenedTasks] = useState(new Set());
+
+  // ✅ ПРАВИЛЬНО - useQuery ВНУТРИ КОМПОНЕНТА!
+  const { data: interfaceTexts } = useQuery({
+    queryKey: ['/api/config/interface-texts'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/config/interface-texts');
+      return response.json();
+    },
+  });
 
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['/api/tasks'],
@@ -89,9 +94,8 @@ export default function TasksTab({ user }: TasksTabProps) {
   };
 
   const verifyTaskCompletion = async (taskId) => {
-    // TODO: логика проверки
     console.log(`Проверяем выполнение задания: ${taskId}`);
-    return Math.random() > 0.3; // 70% шанс успеха
+    return Math.random() > 0.3;
   };
 
   const handleTaskAction = async (task: TaskWithCompletion) => {
@@ -99,7 +103,6 @@ export default function TasksTab({ user }: TasksTabProps) {
 
     hapticFeedback('light');
 
-    // Получаем URL из requirements
     let taskUrl = null;
     try {
       const req = JSON.parse(task.requirements || '{}');
@@ -110,7 +113,6 @@ export default function TasksTab({ user }: TasksTabProps) {
       case 'follow_channel':
       case 'visit_website':
         if (taskUrl) {
-          // Правильное открытие ссылки БЕЗ закрытия WebApp
           if (window.Telegram?.WebApp?.openTelegramLink && taskUrl.includes('t.me')) {
             window.Telegram.WebApp.openTelegramLink(taskUrl);
           } else if (window.Telegram?.WebApp?.openLink) {
@@ -119,9 +121,8 @@ export default function TasksTab({ user }: TasksTabProps) {
             window.open(taskUrl, '_blank');
           }
           
-          // СРАЗУ показываем кнопку "Проверить"
           setOpenedTasks(prev => new Set([...prev, task.id]));
-          return; // НЕ выполняем задание сразу
+          return;
         }
         break;
         
@@ -138,11 +139,9 @@ export default function TasksTab({ user }: TasksTabProps) {
         }
         break;
       case 'daily_login':
-        // Daily login is automatically handled
         break;
     }
 
-    // Для остальных действий - выполняем сразу
     completeTaskMutation.mutate(task.id);
   };
 
@@ -176,43 +175,50 @@ export default function TasksTab({ user }: TasksTabProps) {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg animate-pulse">
-            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-2"></div>
-            <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
-          </div>
-        ))}
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">Загрузка заданий...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Progress Section */}
+      <motion.div
+        className="bg-white dark:bg-[#1A1A1C] rounded-xl p-6 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
+        <h3 className="text-lg font-semibold mb-4">Прогресс выполнения</h3>
+        <Progress value={progressPercentage} className="mb-2" />
+        <p className="text-gray-600 dark:text-gray-400 text-sm">
+          Выполнено {completedTasks} из {totalTasks} заданий
+        </p>
+      </motion.div>
+
       {/* Daily Tasks */}
       {dailyTasks.length > 0 && (
         <motion.div
-          className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
+          className="bg-white dark:bg-[#1A1A1C] rounded-xl p-6 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
         >
-          <h3 className="text-lg font-semibold mb-4 flex items-center">
-            <CalendarDays className="w-5 h-5 text-yellow-500 mr-2" />
-            Ежедневные задания
-          </h3>
+          <h3 className="text-lg font-semibold mb-4">Ежедневные задания</h3>
           <div className="space-y-3">
             {dailyTasks.map((task) => {
               const Icon = getTaskIcon(task.type, task.action);
               const iconColor = getTaskIconColor(task.type, task.action);
-
+              
               return (
                 <motion.div
                   key={task.id}
-                  className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg"
-                  whileHover={{ scale: 1.01 }}
+                  className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#0E0E10] rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                 >
-                  <div className="flex items-center space-x-3">
+                  <div className="flex items-center space-x-4">
                     <div className={`w-10 h-10 ${task.completed ? 'bg-green-500/20' : 'bg-gray-200 dark:bg-gray-700/20'} rounded-lg flex items-center justify-center`}>
                       {task.completed ? (
                         <CheckCircle className="w-5 h-5 text-green-500" />
@@ -231,15 +237,6 @@ export default function TasksTab({ user }: TasksTabProps) {
                     </p>
                     {task.completed ? (
                       <p className="text-green-500 text-xs">Выполнено</p>
-                    ) : openedTasks.has(task.id) ? (
-                      <Button
-                        onClick={() => checkTaskCompletion(task.id)}
-                        disabled={completeTaskMutation.isPending}
-                        variant="outline"
-                        className="text-green-600 border-green-600 hover:bg-green-50 text-xs h-auto p-1"
-                      >
-                        Проверить
-                      </Button>
                     ) : (
                       <Button
                         onClick={() => handleTaskAction(task)}
@@ -247,7 +244,7 @@ export default function TasksTab({ user }: TasksTabProps) {
                         variant="link"
                         className="text-[#4E7FFF] hover:underline p-0 h-auto text-xs"
                       >
-                        {completeTaskMutation.isPending ? 'Выполняется...' : 'Выполнить'}
+                        {completeTaskMutation.isPending ? 'Загрузка...' : task.button_text || 'Выполнить'}
                       </Button>
                     )}
                   </div>
@@ -261,27 +258,25 @@ export default function TasksTab({ user }: TasksTabProps) {
       {/* Social Tasks */}
       {socialTasks.length > 0 && (
         <motion.div
-          className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
+          className="bg-white dark:bg-[#1A1A1C] rounded-xl p-6 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.1 }}
+          transition={{ duration: 0.3, delay: 0.2 }}
         >
-          <h3 className="text-lg font-semibold mb-4 flex items-center">
-            <ThumbsUp className="w-5 h-5 text-[#4E7FFF] mr-2" />
-            Социальные задания
-          </h3>
+          <h3 className="text-lg font-semibold mb-4">Социальные задания</h3>
           <div className="space-y-3">
             {socialTasks.map((task) => {
               const Icon = getTaskIcon(task.type, task.action);
               const iconColor = getTaskIconColor(task.type, task.action);
-
+              
               return (
                 <motion.div
                   key={task.id}
-                  className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg"
-                  whileHover={{ scale: 1.01 }}
+                  className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#0E0E10] rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                 >
-                  <div className="flex items-center space-x-3">
+                  <div className="flex items-center space-x-4">
                     <div className={`w-10 h-10 ${task.completed ? 'bg-green-500/20' : 'bg-gray-200 dark:bg-gray-700/20'} rounded-lg flex items-center justify-center`}>
                       {task.completed ? (
                         <CheckCircle className="w-5 h-5 text-green-500" />
@@ -298,7 +293,6 @@ export default function TasksTab({ user }: TasksTabProps) {
                     <p className="font-semibold text-yellow-500 flex items-center">
                       +{task.reward} <Star className="w-4 h-4 ml-1" />
                     </p>
-                    {/* ✅ ИСПРАВЛЕНЫ КНОПКИ В СОЦИАЛЬНЫХ ЗАДАНИЯХ: */}
                     {task.completed ? (
                       <p className="text-green-500 text-xs">Выполнено</p>
                     ) : openedTasks.has(task.id) ? (
@@ -317,7 +311,7 @@ export default function TasksTab({ user }: TasksTabProps) {
                         variant="link"
                         className="text-[#4E7FFF] hover:underline p-0 h-auto text-xs"
                       >
-                        {completeTaskMutation.isPending ? 'Выполняется...' : 'Выполнить'}
+                        {completeTaskMutation.isPending ? 'Загрузка...' : task.button_text || 'Выполнить'}
                       </Button>
                     )}
                   </div>
@@ -327,29 +321,6 @@ export default function TasksTab({ user }: TasksTabProps) {
           </div>
         </motion.div>
       )}
-
-      {/* Progress */}
-      <motion.div
-        className="bg-gradient-to-r from-[#4E7FFF]/20 to-purple-500/20 rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-white/10"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.2 }}
-      >
-        <h3 className="text-lg font-semibold mb-3">Дневной прогресс</h3>
-        <div className="space-y-3">
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-600 dark:text-gray-400">Выполнено заданий</span>
-            <span className="font-semibold">{completedTasks}/{totalTasks}</span>
-          </div>
-          <Progress value={progressPercentage} className="h-2" />
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-600 dark:text-gray-400">Заработано сегодня</span>
-            <span className="font-semibold text-yellow-500 flex items-center">
-              +{user?.dailyEarnings || 0} <Star className="w-4 h-4 ml-1" />
-            </span>
-          </div>
-        </div>
-      </motion.div>
     </div>
   );
 }
