@@ -59,7 +59,14 @@ async def log_requests(request: Request, call_next):
 
 # Dependency to get storage
 async def get_storage(db: AsyncSession = Depends(get_db)):
-    return Storage(db)
+    try:
+        yield Storage(db)
+        await db.commit()
+    except:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
 
 # Dependency to get current user
 async def get_authenticated_user(
