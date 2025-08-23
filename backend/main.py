@@ -662,6 +662,24 @@ async def update_admin_settings(
     storage: Storage = Depends(get_storage)
 ):
     try:
+        # ✅ ДОБАВЬ ЭТО ЛОГИРОВАНИЕ:
+        logger.info(f"🔥 Received settings: {settings}")
+        logger.info(f"🔥 stars_price: '{settings.stars_price}' (type: {type(settings.stars_price)})")
+        logger.info(f"🔥 ton_price: '{settings.ton_price}' (type: {type(settings.ton_price)})")
+        logger.info(f"🔥 stars_price bool: {bool(settings.stars_price)}")
+        logger.info(f"🔥 ton_price bool: {bool(settings.ton_price)}")
+        
+        if settings.stars_price:
+            logger.info(f"✅ Updating stars_price to: {settings.stars_price}")
+            await storage.update_setting("stars_price", settings.stars_price)
+        else:
+            logger.info(f"❌ Skipping stars_price (value: '{settings.stars_price}')")
+            
+        if settings.ton_price:
+            logger.info(f"✅ Updating ton_price to: {settings.ton_price}")
+            await storage.update_setting("ton_price", settings.ton_price)
+        else:
+            logger.info(f"❌ Skipping ton_price (value: '{settings.ton_price}')")
         if settings.stars_price:
             await storage.update_setting("stars_price", settings.stars_price)
         if settings.ton_price:
