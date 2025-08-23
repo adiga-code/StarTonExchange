@@ -227,6 +227,57 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                   </Button>
                 </div>
               </motion.div>
+
+              {/* Referral Settings */}
+              <motion.div
+                className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25 }}
+              >
+                <h3 className="font-semibold mb-3 flex items-center">
+                  <Shield className="w-4 h-4 text-blue-500 mr-2" />
+                  Реферальные настройки
+                </h3>
+                <div className="space-y-3">
+                  <div>
+                    <Label className="text-sm text-gray-600 dark:text-gray-400">
+                      URL бота
+                    </Label>
+                    <Input
+                      type="text"
+                      value={botBaseUrl}
+                      onChange={(e) => setBotBaseUrl(e.target.value)}
+                      placeholder="https://t.me/bot_name"
+                      className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-600 dark:text-gray-400">
+                      Префикс реферальных ссылок
+                    </Label>
+                    <Input
+                      type="text"
+                      value={referralPrefix}
+                      onChange={(e) => setReferralPrefix(e.target.value)}
+                      placeholder="ref"
+                      className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-600 dark:text-gray-400">
+                      Процент реферального бонуса (%)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={referralBonusPercentage}
+                      onChange={(e) => setReferralBonusPercentage(e.target.value)}
+                      placeholder="10"
+                      className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
+                    />
+                  </div>
+                </div>
+              </motion.div>
               {/* Новые поля для реферальной системы */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
