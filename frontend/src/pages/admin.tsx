@@ -53,8 +53,11 @@ export default function AdminPage() {
         title: "Настройки обновлены",
         description: "Цены успешно обновлены",
       });
-      
+      setTimeout(() => {
+      window.location.reload();
+      }, 1000);
       // ✅ Инвалидируй кеш ВЕЗДЕ
+      queryClient.invalidateQueries();
       queryClient.invalidateQueries({ queryKey: ['/api/admin/settings/current'] });
       queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
       

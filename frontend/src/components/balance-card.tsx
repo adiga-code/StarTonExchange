@@ -19,7 +19,10 @@ export default function BalanceCard({ user }: BalanceCardProps) {
       const response = await apiRequest('GET', '/api/admin/settings/current');
       return response.json();
     },
-    staleTime: 5 * 60 * 1000,
+    //staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+    refetchInterval: 10000, // Каждые 10 секунд
   });
 
   // ✅ Динамический расчет с fallback

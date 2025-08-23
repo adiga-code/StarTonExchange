@@ -94,6 +94,9 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
      });
      return response.json();
    },
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+    refetchInterval: 10000, // Каждые 10 секунд
  });
 
  // Purchase mutation
