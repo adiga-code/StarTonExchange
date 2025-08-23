@@ -323,7 +323,7 @@ class Storage:
     
     async def update_setting(self, key: str, value: str):
         # Найти или создать setting
-        result = await self.session.execute(
+        result = await self.db.execute(
             select(Setting).where(Setting.key == key)
         )
         setting = result.scalar_one_or_none()
@@ -333,9 +333,9 @@ class Storage:
             setting.updated_at = datetime.utcnow()
         else:
             setting = Setting(key=key, value=value)
-            self.session.add(setting)
+            self.db.add(setting)
         
-        await self.session.commit()
+        await self.db.commit()
         
         # Инвалидировать кэш
         if key in self._settings_cache:
