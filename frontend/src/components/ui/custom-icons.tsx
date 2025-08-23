@@ -28,6 +28,13 @@ import {
   DollarSign,
   Activity,
   ArrowLeft,
+  Bell, 
+  Palette, 
+  Receipt, 
+  ChevronDown, 
+  ChevronUp, 
+  Target, 
+  Gift,
 } from "lucide-react";
 
 // Конфигурация кастомных иконок с более надежными источниками
@@ -183,4 +190,9 @@ export {
   DollarSign,
   Activity,
   ArrowLeft,
+  Share,
+  Bell, 
+  Palette,Receipt,
+  ChevronDown, ChevronUp, Target, Gift
+
 };
