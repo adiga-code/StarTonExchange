@@ -4,19 +4,20 @@ import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTelegram } from "@/hooks/use-telegram";
-import { Shield, BarChart3, Tag, History, Users, DollarSign, Activity, ArrowLeft } from "lucide-react";
+import {
+  Shield,
+  BarChart3,
+  Tag,
+  History,
+  Users,
+  DollarSign,
+  Activity,
+  ArrowLeft,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
-
-/**
- * Готовый компонент AdminPage
- * - Отправляет payload в snake_case: stars_price, ton_price, markup_percentage
- * - Преобразует запятые в точки, валидирует числа
- * - Логирует payload в консоль для удобства отладки
- * - Не делает window.location.reload(); вместо этого инвалидирует кэш и refetch
- */
 
 type AdminStats = {
   totalUsers?: number;
@@ -40,13 +41,11 @@ export default function AdminPage(): JSX.Element {
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
 
-  // --- Helpers ---
   const normalizeToStringNumber = (v: any, fallback = ""): string => {
     if (v === null || v === undefined) return fallback;
     const s = String(v).trim();
     if (!s) return fallback;
     if (s.toLowerCase() === "none") return fallback;
-    // заменяем запятую на точку, парсим и возвращаем как строку числа
     const n = Number(String(s).replace(",", "."));
     return Number.isFinite(n) ? String(n) : fallback;
   };
@@ -58,17 +57,14 @@ export default function AdminPage(): JSX.Element {
     return Number.isFinite(n) ? n : NaN;
   };
 
-  // --- Запрос текущих настроек ---
-  const { data: currentSettings, isLoading: settingsLoading } = useQuery({
+  const { data: currentSettings } = useQuery({
     queryKey: ["/api/admin/settings/current"],
     queryFn: async () => {
       const res = await fetch("/api/admin/settings/current", {
         method: "GET",
         headers: { "Content-Type": "application/json" },
       });
-      if (!res.ok) {
-        throw new Error(`Failed to fetch current settings: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`Failed to fetch current settings: ${res.status}`);
       return res.json();
     },
     staleTime: 1000 * 60 * 5,
@@ -81,7 +77,6 @@ export default function AdminPage(): JSX.Element {
     setMarkupPercentage(normalizeToStringNumber(currentSettings.markup_percentage, "5"));
   }, [currentSettings]);
 
-  // --- Запрос статистики админа ---
   const { data: adminStats } = useQuery({
     queryKey: ["/api/admin/stats"],
     queryFn: async () => {
@@ -89,38 +84,37 @@ export default function AdminPage(): JSX.Element {
         method: "GET",
         headers: { "Content-Type": "application/json" },
       });
-      if (!res.ok) {
-        throw new Error(`Failed to fetch admin stats: ${res.status}`);
-      }
-      return (await res.json()) as AdminStats;
+      if (!res.ok) throw new Error(`Failed to fetch admin stats: ${res.status}`);
+      return res.json() as Promise<AdminStats>;
     },
     staleTime: 1000 * 30,
   });
 
-  // --- Мутация обновления настроек (fetch напрямую, чтобы гарантировать JSON) ---
+  // mutation: отправляет любые значения, тело JSON будет строкой в нужных полях
   const updateSettingsMutation = useMutation({
     mutationFn: async (payload: Record<string, any>) => {
-      console.log("🔥 Sending to backend payload:", payload);
+      console.log("🔥 [mutationFn] sending payload:", payload);
       const res = await fetch("/api/admin/settings", {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`Update failed: ${res.status} ${text}`);
+      const text = await res.text().catch(() => "");
+      let json;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        json = text;
       }
-      return res.json();
+      if (!res.ok) {
+        console.error("❌ Response (non-ok):", res.status, json);
+        throw new Error(`Update failed: ${res.status} ${JSON.stringify(json)}`);
+      }
+      return json;
     },
     onSuccess: () => {
       hapticFeedback("success");
-      toast({
-        title: "Настройки обновлены",
-        description: "Цены успешно обновлены",
-      });
-      // инвалидируем и перезапрашиваем нужные данные
+      toast({ title: "Настройки обновлены", description: "Цены успешно обновлены" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
       queryClient.refetchQueries({ queryKey: ["/api/admin/settings/current"] });
@@ -129,23 +123,13 @@ export default function AdminPage(): JSX.Element {
     onError: (err: any) => {
       console.error("❌ Update settings error:", err);
       hapticFeedback("error");
-      toast({
-        title: "Ошибка",
-        description: "Не удалось обновить настройки",
-        variant: "destructive",
-      });
+      toast({ title: "Ошибка", description: "Не удалось обновить настройки", variant: "destructive" });
     },
   });
 
-  // --- Обработчик клика ---
   const handleUpdatePrices = () => {
-    // Валидация заполнения
     if (!starsPrice || !tonPrice || !markupPercentage) {
-      toast({
-        title: "Ошибка валидации",
-        description: "Все поля должны быть заполнены",
-        variant: "destructive",
-      });
+      toast({ title: "Ошибка валидации", description: "Все поля должны быть заполнены", variant: "destructive" });
       return;
     }
 
@@ -154,39 +138,27 @@ export default function AdminPage(): JSX.Element {
     const m = parseNumberOrNaN(markupPercentage);
 
     if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(m)) {
-      toast({
-        title: "Ошибка валидации",
-        description: "Пожалуйста, введите корректные числовые значения.",
-        variant: "destructive",
-      });
+      toast({ title: "Ошибка валидации", description: "Пожалуйста, введите корректные числовые значения.", variant: "destructive" });
       return;
     }
-
     if (s <= 0 || t <= 0 || m < 0) {
-      toast({
-        title: "Ошибка валидации",
-        description: "Цены должны быть положительными числами.",
-        variant: "destructive",
-      });
+      toast({ title: "Ошибка валидации", description: "Цены должны быть положительными числами.", variant: "destructive" });
       return;
     }
 
-    // Формируем payload в snake_case — только те поля, которые валидны
-    const payload: Record<string, number> = {
-      stars_price: s,
-      ton_price: t,
-      markup_percentage: m,
+    // <<< ВАЖНО: отправляем строки, а не числа (как работает ваш curl) >>>
+    const payload: Record<string, string> = {
+      stars_price: String(s),           // "1.8"
+      ton_price: String(t),             // "220"
+      markup_percentage: String(m),     // "5"
     };
 
-    // Логируем для отладки (devtools + серверные логи можно сверить)
-    console.log("🔥 Frontend prepared payload:", payload);
-
+    console.log("🔥 Frontend prepared payload (string values):", payload, "stringified:", JSON.stringify(payload));
     updateSettingsMutation.mutate(payload);
   };
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0E0E10] text-gray-900 dark:text-white">
-      {/* Header */}
       <header className="sticky top-0 z-50 bg-white/80 dark:bg-[#0E0E10]/80 backdrop-blur-lg border-b border-gray-200 dark:border-white/10">
         <div className="flex items-center justify-between p-4">
           <Link href="/">
@@ -195,8 +167,7 @@ export default function AdminPage(): JSX.Element {
             </Button>
           </Link>
           <h1 className="text-lg font-bold flex items-center">
-            <Shield className="w-5 h-5 text-[#4E7FFF] mr-2" />
-            Админ панель
+            <Shield className="w-5 h-5 text-[#4E7FFF] mr-2" /> Админ панель
           </h1>
           <div style={{ width: 36 }} />
         </div>
@@ -204,139 +175,61 @@ export default function AdminPage(): JSX.Element {
 
       <main className="p-4 space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Statistics */}
-          <motion.div
-            className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-          >
-            <h3 className="font-semibold mb-3 flex items-center">
-              <BarChart3 className="w-4 h-4 text-green-500 mr-2" />
-              Статистика
-            </h3>
+          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+            <h3 className="font-semibold mb-3 flex items-center"><BarChart3 className="w-4 h-4 text-green-500 mr-2" />Статистика</h3>
             <div className="space-y-3">
               <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400 flex items-center">
-                  <Users className="w-4 h-4 mr-1" />
-                  Пользователей
-                </span>
+                <span className="text-gray-600 dark:text-gray-400 flex items-center"><Users className="w-4 h-4 mr-1" />Пользователей</span>
                 <span className="font-semibold">{adminStats?.totalUsers ?? 0}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400 flex items-center">
-                  <DollarSign className="w-4 h-4 mr-1" />
-                  Продаж сегодня
-                </span>
+                <span className="text-gray-600 dark:text-gray-400 flex items-center"><DollarSign className="w-4 h-4 mr-1" />Продаж сегодня</span>
                 <span className="font-semibold text-green-500">₽{adminStats?.todaySales ?? 0}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400 flex items-center">
-                  <Activity className="w-4 h-4 mr-1" />
-                  Активных рефералов
-                </span>
+                <span className="text-gray-600 dark:text-gray-400 flex items-center"><Activity className="w-4 h-4 mr-1" />Активных рефералов</span>
                 <span className="font-semibold">{adminStats?.activeReferrals ?? 0}</span>
               </div>
             </div>
           </motion.div>
 
-          {/* Price Management */}
-          <motion.div
-            className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <h3 className="font-semibold mb-3 flex items-center">
-              <Tag className="w-4 h-4 text-yellow-500 mr-2" />
-              Управление ценами
-            </h3>
+          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+            <h3 className="font-semibold mb-3 flex items-center"><Tag className="w-4 h-4 text-yellow-500 mr-2" />Управление ценами</h3>
             <div className="space-y-3">
               <div>
                 <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за звезду (₽)</Label>
-                <Input
-                  type="text"
-                  value={starsPrice}
-                  onChange={(e) => setStarsPrice(e.target.value)}
-                  placeholder="2.30"
-                  className="mt-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20"
-                />
+                <Input type="text" value={starsPrice} onChange={(e) => setStarsPrice(e.target.value)} placeholder="2.30" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
               <div>
                 <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за TON (₽)</Label>
-                <Input
-                  type="text"
-                  value={tonPrice}
-                  onChange={(e) => setTonPrice(e.target.value)}
-                  placeholder="420.50"
-                  className="mt-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20"
-                />
+                <Input type="text" value={tonPrice} onChange={(e) => setTonPrice(e.target.value)} placeholder="420.50" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
               <div>
                 <Label className="text-sm text-gray-600 dark:text-gray-400">Наценка (%)</Label>
-                <Input
-                  type="text"
-                  value={markupPercentage}
-                  onChange={(e) => setMarkupPercentage(e.target.value)}
-                  placeholder="5"
-                  className="mt-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20"
-                />
+                <Input type="text" value={markupPercentage} onChange={(e) => setMarkupPercentage(e.target.value)} placeholder="5" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
-              <Button
-                onClick={handleUpdatePrices}
-                disabled={updateSettingsMutation.isLoading}
-                className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white"
-              >
+              <Button onClick={handleUpdatePrices} disabled={updateSettingsMutation.isLoading} className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white">
                 {updateSettingsMutation.isLoading ? "Обновление..." : "Обновить цены"}
               </Button>
             </div>
           </motion.div>
 
-          {/* Recent Transactions */}
-          <motion.div
-            className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg md:col-span-2"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <h3 className="font-semibold mb-3 flex items-center">
-              <History className="w-4 h-4 text-[#4E7FFF] mr-2" />
-              Последние транзакции
-            </h3>
+          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg md:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+            <h3 className="font-semibold mb-3 flex items-center"><History className="w-4 h-4 text-[#4E7FFF] mr-2" />Последние транзакции</h3>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {adminStats?.recentTransactions?.length ? (
-                adminStats.recentTransactions.map((transaction) => (
-                  <div
-                    key={transaction.id}
-                    className="flex items-center justify-between py-2 border-b border-gray-200 dark:border-white/10 last:border-b-0"
-                  >
+                adminStats.recentTransactions.map((tx) => (
+                  <div key={tx.id} className="flex items-center justify-between py-2 border-b border-gray-200 dark:border-white/10 last:border-b-0">
                     <div>
-                      <p className="font-medium">{transaction.username}</p>
-                      <p className="text-gray-600 dark:text-gray-400 text-sm">{transaction.description}</p>
+                      <p className="font-medium">{tx.username}</p>
+                      <p className="text-gray-600 dark:text-gray-400 text-sm">{tx.description}</p>
                     </div>
                     <div className="text-right">
-                      <p
-                        className={`font-medium ${
-                          transaction.status === "completed"
-                            ? "text-green-500"
-                            : transaction.status === "failed"
-                            ? "text-red-500"
-                            : "text-yellow-500"
-                        }`}
-                      >
-                        {transaction.status === "completed"
-                          ? "Успешно"
-                          : transaction.status === "failed"
-                          ? "Ошибка"
-                          : "В обработке"}
+                      <p className={`font-medium ${tx.status === "completed" ? "text-green-500" : tx.status === "failed" ? "text-red-500" : "text-yellow-500"}`}>
+                        {tx.status === "completed" ? "Успешно" : tx.status === "failed" ? "Ошибка" : "В обработке"}
                       </p>
                       <p className="text-gray-600 dark:text-gray-400 text-xs">
-                        {transaction.createdAt
-                          ? new Date(transaction.createdAt).toLocaleTimeString("ru-RU", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })
-                          : ""}
+                        {tx.createdAt ? new Date(tx.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : ""}
                       </p>
                     </div>
                   </div>
