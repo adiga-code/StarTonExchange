@@ -598,4 +598,4 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
       </motion.div>
     </div>
   );
-}
+} 
