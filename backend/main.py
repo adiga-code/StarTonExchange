@@ -134,7 +134,7 @@ async def update_current_user(
     updated_user = await storage.update_user(current_user.id, update_dict)
     return updated_user
 
-@app.get("/api/transactions/history")
+@app.get("/api/transactions/history", response_model=TransactionHistoryResponse)
 async def get_user_transactions_history(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
@@ -143,9 +143,12 @@ async def get_user_transactions_history(
     try:
         transactions = await storage.get_transactions_by_user_id(current_user.id)
         
+        # Фильтруем только покупки (тип "purchase")
+        purchase_transactions = [t for t in transactions if t.type == "purchase"]
+        
         # Преобразуем в нужный формат для фронтенда
         transaction_history = []
-        for transaction in transactions:
+        for transaction in purchase_transactions:
             # Определяем тип транзакции и иконку
             transaction_type = "purchase"
             icon_type = "star" if transaction.currency == "stars" else "ton"
@@ -181,6 +184,14 @@ async def get_user_transactions_history(
                 "cancelled": "gray"
             }.get(transaction.status, "gray")
             
+            # Форматирование даты с русскими месяцами
+            month_names = {
+                1: "янв", 2: "фев", 3: "мар", 4: "апр", 5: "май", 6: "июн",
+                7: "июл", 8: "авг", 9: "сен", 10: "окт", 11: "ноя", 12: "дек"
+            }
+            created_date = transaction.created_at
+            formatted_date = f"{created_date.day} {month_names[created_date.month]} {created_date.year}, {created_date.strftime('%H:%M')}"
+            
             transaction_history.append({
                 "id": transaction.id,
                 "description": description,
@@ -192,7 +203,7 @@ async def get_user_transactions_history(
                 "status_color": status_color,
                 "icon_type": icon_type,
                 "created_at": transaction.created_at.isoformat(),
-                "created_at_formatted": transaction.created_at.strftime("%d %b %Y, %H:%M")
+                "created_at_formatted": formatted_date
             })
         
         # Сортируем по дате создания (новые сверху)
@@ -341,7 +352,7 @@ async def make_purchase(
         # Create transaction record
         transaction_data = TransactionCreate(
             user_id=current_user.id,
-            type="buy_stars" if purchase_data.currency == "stars" else "buy_ton",
+            type="purchase",  # Унифицированный тип для всех покупок
             currency=purchase_data.currency,
             amount=Decimal(str(purchase_data.amount)),
             rub_amount=Decimal(str(purchase_data.rub_amount)),
@@ -846,7 +857,66 @@ async def create_task_admin(
         logger.error(f"Error creating task: {e}")
         raise HTTPException(status_code=500, detail="Failed to create task")
 
-
+@app.get("/api/tasks/completed")
+async def get_user_completed_tasks(
+    current_user: User = Depends(get_authenticated_user),
+    storage: Storage = Depends(get_storage)
+):
+    """Получить историю выполненных заданий пользователя"""
+    try:
+        # Получаем все выполненные задания пользователя
+        completed_user_tasks = await storage.get_completed_user_tasks(current_user.id)
+        
+        # Преобразуем в нужный формат для фронтенда
+        completed_tasks_history = []
+        for user_task in completed_user_tasks:
+            task = await storage.get_task(user_task.task_id)
+            if not task:
+                continue
+                
+            # Определяем тип задания на русском
+            task_type_map = {
+                "daily": "Ежедневное",
+                "social": "Социальное", 
+                "purchase": "Покупка",
+                "referral": "Реферальное",
+                "special": "Специальное"
+            }
+            task_type_text = task_type_map.get(task.type, task.type.capitalize())
+            
+            # Форматирование даты с русскими месяцами
+            month_names = {
+                1: "янв", 2: "фев", 3: "мар", 4: "апр", 5: "май", 6: "июн",
+                7: "июл", 8: "авг", 9: "сен", 10: "окт", 11: "ноя", 12: "дек"
+            }
+            completed_date = user_task.completed_at
+            formatted_date = f"{completed_date.day} {month_names[completed_date.month]} {completed_date.year}, {completed_date.strftime('%H:%M')}"
+            
+            completed_tasks_history.append({
+                "id": user_task.id,
+                "task_id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "reward": task.reward,
+                "task_type": task.type,
+                "task_type_text": task_type_text,
+                "completed_at": user_task.completed_at.isoformat(),
+                "completed_at_formatted": formatted_date
+            })
+        
+        # Сортируем по дате выполнения (новые сверху)
+        completed_tasks_history.sort(key=lambda x: x["completed_at"], reverse=True)
+        
+        return {
+            "success": True, 
+            "completed_tasks": completed_tasks_history,
+            "count": len(completed_tasks_history)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting completed tasks history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get completed tasks history")
+    
 @app.get("/api/admin/tasks/list")
 async def list_tasks_admin(
     token: str,

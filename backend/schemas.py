@@ -91,6 +91,29 @@ class TransactionHistoryResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# Completed Tasks History schemas
+class CompletedTaskHistoryItem(BaseModel):
+    id: str
+    task_id: str
+    title: str
+    description: str
+    reward: int
+    task_type: str
+    task_type_text: str
+    completed_at: str
+    completed_at_formatted: str
+    
+    class Config:
+        from_attributes = True
+
+class CompletedTasksHistoryResponse(BaseModel):
+    success: bool
+    completed_tasks: List[CompletedTaskHistoryItem]
+    count: int
+    
+    class Config:
+        from_attributes = True
+
 # Task schemas
 class TaskCreate(BaseModel):
     title: str

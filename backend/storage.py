@@ -243,6 +243,20 @@ class Storage:
         await self.db.commit()
         return await self.get_user_task(user_id, task_id)
 
+    async def get_completed_user_tasks(self, user_id: str) -> List[UserTask]:
+        """Получить все выполненные задания пользователя"""
+        result = await self.db.execute(
+            select(UserTask)
+            .where(
+                and_(
+                    UserTask.user_id == user_id,
+                    UserTask.completed == True
+                )
+            )
+            .order_by(UserTask.completed_at.desc())
+        )
+        return result.scalars().all()
+
     # Setting methods
     async def get_setting(self, key: str) -> Optional[Setting]:
         result = await self.db.execute(select(Setting).where(Setting.key == key))
