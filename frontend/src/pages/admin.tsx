@@ -1,4 +1,3 @@
-// AdminPage.tsx
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -32,10 +31,22 @@ type AdminStats = {
   }>;
 };
 
+type CurrentSettings = {
+  stars_price?: string | number;
+  ton_price?: string | number;
+  markup_percentage?: string | number;
+  bot_base_url?: string;
+  referral_prefix?: string;
+  referral_bonus_percentage?: string | number;
+};
+
 export default function AdminPage(): JSX.Element {
   const [starsPrice, setStarsPrice] = useState<string>("");
   const [tonPrice, setTonPrice] = useState<string>("");
   const [markupPercentage, setMarkupPercentage] = useState<string>("5");
+  const [botBaseUrl, setBotBaseUrl] = useState<string>("");
+  const [referralPrefix, setReferralPrefix] = useState<string>("");
+  const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
 
   const { toast } = useToast();
   const { hapticFeedback } = useTelegram();
@@ -57,7 +68,7 @@ export default function AdminPage(): JSX.Element {
     return Number.isFinite(n) ? n : NaN;
   };
 
-  const { data: currentSettings } = useQuery({
+  const { data: currentSettings } = useQuery<CurrentSettings, Error>({
     queryKey: ["/api/admin/settings/current"],
     queryFn: async () => {
       const res = await fetch("/api/admin/settings/current", {
@@ -75,9 +86,12 @@ export default function AdminPage(): JSX.Element {
     setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "2.30"));
     setTonPrice(normalizeToStringNumber(currentSettings.ton_price, "420.50"));
     setMarkupPercentage(normalizeToStringNumber(currentSettings.markup_percentage, "5"));
+    setBotBaseUrl(currentSettings.bot_base_url || "");
+    setReferralPrefix(currentSettings.referral_prefix || "");
+    setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, ""));
   }, [currentSettings]);
 
-  const { data: adminStats } = useQuery({
+  const { data: adminStats } = useQuery<AdminStats, Error>({
     queryKey: ["/api/admin/stats"],
     queryFn: async () => {
       const res = await fetch("/api/admin/stats", {
@@ -90,7 +104,6 @@ export default function AdminPage(): JSX.Element {
     staleTime: 1000 * 30,
   });
 
-  // mutation: отправляет любые значения, тело JSON будет строкой в нужных полях
   const updateSettingsMutation = useMutation({
     mutationFn: async (payload: Record<string, any>) => {
       console.log("🔥 [mutationFn] sending payload:", payload);
@@ -128,7 +141,7 @@ export default function AdminPage(): JSX.Element {
   });
 
   const handleUpdatePrices = () => {
-    if (!starsPrice || !tonPrice || !markupPercentage) {
+    if (!starsPrice || !tonPrice || !markupPercentage || !botBaseUrl || !referralPrefix || !referralBonusPercentage) {
       toast({ title: "Ошибка валидации", description: "Все поля должны быть заполнены", variant: "destructive" });
       return;
     }
@@ -136,21 +149,24 @@ export default function AdminPage(): JSX.Element {
     const s = parseNumberOrNaN(starsPrice);
     const t = parseNumberOrNaN(tonPrice);
     const m = parseNumberOrNaN(markupPercentage);
+    const rbp = parseNumberOrNaN(referralBonusPercentage);
 
-    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(m)) {
+    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(m) || Number.isNaN(rbp)) {
       toast({ title: "Ошибка валидации", description: "Пожалуйста, введите корректные числовые значения.", variant: "destructive" });
       return;
     }
-    if (s <= 0 || t <= 0 || m < 0) {
-      toast({ title: "Ошибка валидации", description: "Цены должны быть положительными числами.", variant: "destructive" });
+    if (s <= 0 || t <= 0 || m < 0 || rbp < 0) {
+      toast({ title: "Ошибка валидации", description: "Цены и проценты должны быть положительными числами.", variant: "destructive" });
       return;
     }
 
-    // <<< ВАЖНО: отправляем строки, а не числа (как работает ваш curl) >>>
     const payload: Record<string, string> = {
-      stars_price: String(s),           // "1.8"
-      ton_price: String(t),             // "220"
-      markup_percentage: String(m),     // "5"
+      stars_price: String(s),
+      ton_price: String(t),
+      markup_percentage: String(m),
+      bot_base_url: botBaseUrl,
+      referral_prefix: referralPrefix,
+      referral_bonus_percentage: String(rbp),
     };
 
     console.log("🔥 Frontend prepared payload (string values):", payload, "stringified:", JSON.stringify(payload));
@@ -208,9 +224,24 @@ export default function AdminPage(): JSX.Element {
                 <Label className="text-sm text-gray-600 dark:text-gray-400">Наценка (%)</Label>
                 <Input type="text" value={markupPercentage} onChange={(e) => setMarkupPercentage(e.target.value)} placeholder="5" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
-              <Button onClick={handleUpdatePrices} disabled={updateSettingsMutation.isLoading} className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white">
-                {updateSettingsMutation.isLoading ? "Обновление..." : "Обновить цены"}
-              </Button>
+            </div>
+          </motion.div>
+
+          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg md:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+            <h3 className="font-semibold mb-3 flex items-center"><Tag className="w-4 h-4 text-blue-500 mr-2" />Реферальные настройки</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm text-gray-600 dark:text-gray-400">URL бота</Label>
+                <Input type="text" value={botBaseUrl} onChange={(e) => setBotBaseUrl(e.target.value)} placeholder="https://t.me/bot_name" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+              </div>
+              <div>
+                <Label className="text-sm text-gray-600 dark:text-gray-400">Префикс реферальных ссылок</Label>
+                <Input type="text" value={referralPrefix} onChange={(e) => setReferralPrefix(e.target.value)} placeholder="ref" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-sm text-gray-600 dark:text-gray-400">Процент реферального бонуса (%)</Label>
+                <Input type="text" value={referralBonusPercentage} onChange={(e) => setReferralBonusPercentage(e.target.value)} placeholder="10" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+              </div>
             </div>
           </motion.div>
 
@@ -240,6 +271,10 @@ export default function AdminPage(): JSX.Element {
             </div>
           </motion.div>
         </div>
+
+        <Button onClick={handleUpdatePrices} disabled={updateSettingsMutation.isLoading} className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white fixed bottom-4 left-4 right-4">
+          {updateSettingsMutation.isLoading ? "Обновление..." : "Обновить все настройки"}
+        </Button>
       </main>
     </div>
   );
