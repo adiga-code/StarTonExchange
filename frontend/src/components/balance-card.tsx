@@ -3,6 +3,8 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Star } from "@/components/ui/custom-icons";
+import { Button } from "@/components/ui/button"; // Добавляем Button из вашей UI-библиотеки
+import { useToast } from "@/hooks/use-toast"; // Добавляем useToast для уведомлений
 import type { SnakeCaseUser } from "@shared/schema";
 
 interface BalanceCardProps {
@@ -10,6 +12,7 @@ interface BalanceCardProps {
 }
 
 export default function BalanceCard({ user }: BalanceCardProps) {
+  const { toast } = useToast(); // Инициализируем хук для уведомлений
   const starsBalance = user?.stars_balance ?? 0;
 
   // ✅ Получаем актуальные цены из API
@@ -19,7 +22,6 @@ export default function BalanceCard({ user }: BalanceCardProps) {
       const response = await apiRequest('GET', '/api/admin/settings/current');
       return response.json();
     },
-    //staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnMount: true,
     refetchInterval: 10000, // Каждые 10 секунд
@@ -47,7 +49,7 @@ export default function BalanceCard({ user }: BalanceCardProps) {
         </motion.h2>
         
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-center">
             <div className="flex items-center">
               <Star className="w-6 h-6 text-yellow-300 mr-3" />
               <div>
@@ -66,24 +68,38 @@ export default function BalanceCard({ user }: BalanceCardProps) {
           </div>
           
           <motion.div
-            className="mt-4 pt-4 border-t border-white/10"
+            className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
-            <p className="text-gray-200 text-xs">Стоимость звезд</p>
-            <motion.p
-              className="text-lg font-semibold"
-              key={totalRubValue}
-              initial={{ scale: 1 }}
-              animate={{ scale: [1, 1.05, 1] }}
-              transition={{ duration: 0.3 }}
-            >
-              ₽{totalRubValue.toLocaleString()}
-            </motion.p>
-            <div className="text-xs text-gray-200 mt-1">
-              {starsBalance.toLocaleString()} × ₽{starsPrice} за звезду
+            <div className="text-center">
+              <p className="text-gray-200 text-xs">Стоимость звезд</p>
+              <motion.p
+                className="text-lg font-semibold"
+                key={totalRubValue}
+                initial={{ scale: 1 }}
+                animate={{ scale: [1, 1.05, 1] }}
+                transition={{ duration: 0.3 }}
+              >
+                ₽{totalRubValue.toLocaleString()}
+              </motion.p>
+              <div className="text-xs text-gray-200 mt-1">
+                {starsBalance.toLocaleString()} × ₽{starsPrice} за звезду
+              </div>
             </div>
+            <Button
+              onClick={() => {
+                // Здесь можно добавить логику для вывода звезд
+                toast({
+                  title: "Вывод",
+                  description: "Функция вывода звезд в разработке",
+                });
+              }}
+              className="bg-white text-[#4E7FFF] hover:bg-gray-100"
+            >
+              Вывести
+            </Button>
           </motion.div>
         </div>
       </div>
