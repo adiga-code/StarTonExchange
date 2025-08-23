@@ -230,7 +230,7 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
               {/* Новые поля для реферальной системы */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>URL бота</Label>
+                  <Label>URL бота</Label> 
                   <Input
                     value={botBaseUrl}
                     onChange={(e) => setBotBaseUrl(e.target.value)}
