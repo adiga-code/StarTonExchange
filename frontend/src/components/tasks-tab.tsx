@@ -1,4 +1,4 @@
-попрозаimport { useState } from "react";  // ✅ ДОБАВЛЕН ИМПОРТ
+import { useState } from "react";  // ✅ ДОБАВЛЕН ИМПОРТ
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
