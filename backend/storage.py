@@ -32,15 +32,29 @@ class Storage:
     
     async def get_user_referrals(self, user_id: str) -> List[User]:
         """Получить всех рефералов конкретного пользователя"""
+        import logging
+        logger = logging.getLogger(__name__)
         try:
+            logger.info(f"Getting referrals for user_id: {user_id}")
+            
             result = await self.db.execute(
-                select(User).where(User.referred_by == user_id)
+                select(User)
+                .where(User.referred_by == user_id)
+                .order_by(User.created_at.desc())  # Сортируем по дате создания
             )
-            return result.scalars().all()
+            referrals = result.scalars().all()
+            
+            logger.info(f"Found {len(referrals)} referrals for user {user_id}")
+            
+            # Дополнительная отладка - покажем ID рефералов
+            if referrals:
+                referral_ids = [r.id for r in referrals]
+                logger.info(f"Referral IDs: {referral_ids}")
+            
+            return referrals
+            
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error getting user referrals: {e}")
+            logger.error(f"Error getting user referrals for {user_id}: {e}", exc_info=True)
             return []
         
     async def create_user(self, user_data: UserCreate) -> User:

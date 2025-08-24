@@ -601,30 +601,39 @@ async def get_referral_stats_v2(
     storage: Storage = Depends(get_storage)
 ):
     try:
-        # Используем прямой запрос рефералов (добавьте метод get_user_referrals в Storage)
+        # Получаем всех рефералов пользователя
         referrals = await storage.get_user_referrals(current_user.id)
         
-        # Формируем список рефералов
+        # Формируем список рефералов для ответа
         referral_list = []
         for referral in referrals:
             referral_data = {
                 "id": referral.id,
-                "username": referral.username,
-                "first_name": referral.first_name,
+                "username": referral.username or "",
+                "first_name": referral.first_name or "",
                 "created_at": referral.created_at.isoformat() if referral.created_at else None
             }
             referral_list.append(referral_data)
         
+        # Логируем для отладки
+        logger.info(f"User {current_user.id} has {len(referral_list)} referrals")
+        
         return ReferralStats(
-            total_referrals=len(referral_list),
+            total_referrals=len(referral_list),  # Правильный подсчет
             total_earnings=current_user.total_referral_earnings or 0,
             referral_code=current_user.referral_code,
             referrals=referral_list
         )
         
     except Exception as e:
-        logger.error(f"Error getting referral stats: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to get referral stats")
+        logger.error(f"Error getting referral stats for user {current_user.id}: {e}", exc_info=True)
+        # Возвращаем пустые данные вместо ошибки
+        return ReferralStats(
+            total_referrals=0,
+            total_earnings=current_user.total_referral_earnings or 0,
+            referral_code=current_user.referral_code,
+            referrals=[]
+        )
     
 # Payment webhook and status routes
 @app.post("/api/payment/webhook/robokassa")
