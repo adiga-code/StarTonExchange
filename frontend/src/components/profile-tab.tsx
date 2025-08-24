@@ -153,10 +153,12 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
     const fullMessage = `${shareText}\n\n${referralLink}`;
 
     if (window.Telegram?.WebApp) {
-      // Directly open chat selection with the message
-      window.Telegram.WebApp.switchInlineQuery(fullMessage, ['users', 'groups', 'channels']);
+      // Используем openTelegramLink вместо switchInlineQuery
+      window.Telegram.WebApp.openTelegramLink(
+        `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(shareText)}`
+      );
     } else {
-      // Browser fallback
+      // Резерв для браузера
       if (navigator.share) {
         navigator.share({
           title: 'Stars Exchange',
