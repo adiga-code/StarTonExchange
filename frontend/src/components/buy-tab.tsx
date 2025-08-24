@@ -420,15 +420,15 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
                    <div className="flex justify-between items-center mb-2">
                      <span className="text-gray-600 dark:text-gray-400">Стоимость:</span>
                      <span className="font-semibold line-through text-red-500">
-                       ₽{parseFloat(priceCalculation.official_price).toLocaleString()} (за офф стоимость)
+                       ₽{parseFloat(priceCalculation.official_price).toLocaleString()}
                      </span>
                    </div>
                  )}
-                 {priceCalculation.savings_percentage && (
+                 {priceCalculation.savings_amount && (
                    <div className="flex justify-between items-center mb-2">
                      <span className="text-gray-600 dark:text-gray-400">Скидка:</span>
                      <span className="font-semibold text-green-500">
-                       {priceCalculation.savings_percentage}%
+                       ₽{parseFloat(priceCalculation.savings_amount).toLocaleString()}
                      </span>
                    </div>
                  )}
