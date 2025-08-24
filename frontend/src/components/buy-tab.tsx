@@ -293,12 +293,36 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
         </div>
       </motion.div>
 
-      {/* Purchase Calculator */}
+      {/* Quick Buy Options */}
       <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.1 }}
+      >
+        <h3 className="text-lg font-semibold mb-4">Быстрый выбор</h3>
+        <div className="grid grid-cols-4 gap-2">
+          {quickBuyOptions.map((option) => (
+            <Button
+              key={option}
+              variant="outline"
+              size="sm"
+              onClick={() => handleQuickBuy(option)}
+              className="text-xs border-gray-200 dark:border-white/20 hover:bg-[#4E7FFF]/10 hover:border-[#4E7FFF]"
+              disabled={isProcessing}
+            >
+              {option}{selectedCurrency === 'stars' ? '' : ' TON'}
+            </Button>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* Purchase Calculator */}
+      <motion.div
+        className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.2 }}
       >
         <h3 className="text-lg font-semibold mb-4 flex items-center">
           <ShoppingCart className="w-5 h-5 mr-2 text-[#4E7FFF]" />
@@ -377,25 +401,6 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
               className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
               disabled={isProcessing}
             />
-          </div>
-
-          {/* Quick Buy Options */}
-          <div className="space-y-2">
-            <Label className="text-gray-600 dark:text-gray-400">Быстрый выбор</Label>
-            <div className="grid grid-cols-4 gap-2">
-              {quickBuyOptions.map((option) => (
-                <Button
-                  key={option}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleQuickBuy(option)}
-                  className="text-xs border-gray-200 dark:border-white/20 hover:bg-[#4E7FFF]/10 hover:border-[#4E7FFF]"
-                  disabled={isProcessing}
-                >
-                  {option}{selectedCurrency === 'stars' ? '' : ' TON'}
-                </Button>
-              ))}
-            </div>
           </div>
 
           {/* Price Display */}
