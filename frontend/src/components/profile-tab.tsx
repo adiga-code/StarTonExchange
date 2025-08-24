@@ -330,7 +330,7 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
             whileHover={{ scale: 1.02 }}
           >
             <p className="text-2xl font-bold text-[#4E7FFF]">
-              {referralStats?.totalReferrals || 0}
+              {referralStats?.total_referrals || referralStats?.totalReferrals || 0}
             </p>
             <p className="text-gray-600 dark:text-gray-400 text-sm">Рефералов</p>
           </motion.div>
