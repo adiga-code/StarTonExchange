@@ -149,37 +149,48 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
     hapticFeedback('medium');
     
     const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code}`;
+    const shareText = referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON!';
+    const fullMessage = `${shareText}\n\n${referralLink}`;
     
     if (window.Telegram?.WebApp) {
-      try {
-        // Пробуем использовать openTelegramLink для inline режима
-        const botUsername = referralConfig?.bot_base_url?.split('/').pop(); // Извлекаем username
-        const inlineUrl = `https://t.me/${botUsername}?start=inline`;
-        
-        window.Telegram.WebApp.openTelegramLink(inlineUrl);
-      } catch (error) {
-        console.log('openTelegramLink failed, trying alternative method');
-        
-        // Альтернативный метод - открыть бота напрямую
-        try {
-          window.Telegram.WebApp.openTelegramLink(referralLink);
-        } catch (secondError) {
-          // Последний fallback - копировать ссылку
-          copyReferralLink();
-          toast({
-            title: "Ссылка скопирована",
-            description: "Поделитесь ей с друзьями вручную",
-          });
-        }
-      }
-    } else {
-      // Fallback для браузера
-      const shareText = referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON!';
+      // Создаем кнопку внутри WebApp, которая использует switchInlineQuery
+      const shareButton = document.createElement('button');
+      shareButton.innerHTML = 'Выбрать чат';
+      shareButton.onclick = () => {
+        window.Telegram.WebApp.switchInlineQuery(fullMessage, ['users', 'groups']);
+      };
       
+      // Показываем popup с кнопкой
+      window.Telegram.WebApp.showPopup({
+        title: 'Поделиться ссылкой',
+        message: 'Выберите способ поделиться реферальной ссылкой',
+        buttons: [
+          {
+            type: 'default',
+            text: 'Выбрать чат',
+            id: 'share'
+          },
+          {
+            type: 'default', 
+            text: 'Копировать',
+            id: 'copy'
+          }
+        ]
+      }, (buttonId) => {
+        if (buttonId === 'share') {
+          setTimeout(() => {
+            window.Telegram.WebApp.switchInlineQuery(fullMessage, ['users', 'groups']);
+          }, 100);
+        } else if (buttonId === 'copy') {
+          copyReferralLink();
+        }
+      });
+    } else {
+      // Браузерный fallback
       if (navigator.share) {
         navigator.share({
           title: 'Stars Exchange',
-          text: `${shareText}\n\n${referralLink}`
+          text: fullMessage
         }).catch(() => copyReferralLink());
       } else {
         copyReferralLink();
