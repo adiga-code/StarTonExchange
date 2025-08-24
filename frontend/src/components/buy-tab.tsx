@@ -249,7 +249,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
 
   const prices = {
     stars: adminSettings?.stars_price ? parseFloat(adminSettings.stars_price) : 2.30,
-    ton: adminSettings?.ton_price ? parseFloat(adminSettings.ton_price) : 420.50,
+    ton: 0,
   };
 
  const quickBuyOptions = selectedCurrency === 'stars'

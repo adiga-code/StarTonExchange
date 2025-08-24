@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 import base64
 from pyrogram import Client
 from pyrogram.errors import UsernameNotOccupied, UsernameInvalid, FloodWait, AuthKeyUnregistered
-
+from ton_price_service import ton_price_service
 
 # Load environment variables
 load_dotenv()
@@ -338,7 +338,7 @@ async def calculate_purchase(
         
         prices = {
             "stars": float(await storage.get_cached_setting("stars_price")),
-            "ton": float(await storage.get_cached_setting("ton_price")),
+            "ton": await ton_price_service.get_current_ton_price_rub(storage),
         }
         
         # Рассчитываем цену без наценки
@@ -397,7 +397,7 @@ async def make_purchase(
         # Get current prices without markup
         prices = {
             "stars": float(await storage.get_cached_setting("stars_price")),
-            "ton": float(await storage.get_cached_setting("ton_price")),
+            "ton": await ton_price_service.get_current_ton_price_rub(storage),
         }
         
         # Calculate total price without markup
@@ -1093,8 +1093,10 @@ async def delete_task_admin(
 async def get_admin_settings(storage: Storage = Depends(get_storage)):
     return {
         "stars_price": await storage.get_cached_setting("stars_price"),
-        "ton_price": await storage.get_cached_setting("ton_price"),
-        # "markup_percentage": await storage.get_cached_setting("markup_percentage"),
+        "ton_markup_percentage": await storage.get_cached_setting("ton_markup_percentage"),
+        "ton_price_cache_minutes": await storage.get_cached_setting("ton_price_cache_minutes"), 
+        "ton_fallback_price": await storage.get_cached_setting("ton_fallback_price"),
+        "referral_registration_bonus": await storage.get_cached_setting("referral_registration_bonus"),
         "bot_base_url": await storage.get_cached_setting("bot_base_url"),
         "referral_prefix": await storage.get_cached_setting("referral_prefix"),
         "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage"),

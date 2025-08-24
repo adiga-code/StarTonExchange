@@ -225,7 +225,10 @@ class AdminStats(BaseModel):
 
 class AdminSettingsUpdate(BaseModel):
     stars_price: Optional[str] = None
-    ton_price: Optional[str] = None
+    ton_markup_percentage: Optional[str] = None
+    ton_price_cache_minutes: Optional[str] = None
+    ton_fallback_price: Optional[str] = None
+    referral_registration_bonus: Optional[str] = None
     #markup_percentage: Optional[str] = None
     bot_base_url: Optional[str] = None
     referral_prefix: Optional[str] = None

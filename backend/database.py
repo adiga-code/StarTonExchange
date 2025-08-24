@@ -46,7 +46,6 @@ async def init_default_data():
         # Initialize default settings
         default_settings = [
             Setting(key="stars_price", value="2.30"),
-            Setting(key="ton_price", value="420.50"),
             Setting(key="markup_percentage", value="5"),
             Setting(key="bot_base_url", value="https://t.me/starsexchange_bot"),
             Setting(key="referral_prefix", value="ref"),
@@ -56,6 +55,9 @@ async def init_default_data():
             Setting(key="copy_error", value="Не удалось скопировать ссылку"),
             Setting(key="loading", value="Загрузка..."),
             Setting(key="error", value="Ошибка"),
+            Setting(key="ton_markup_percentage", value="5"),
+            Setting(key="ton_price_cache_minutes", value="15"),
+            Setting(key="ton_fallback_price", value="420"),
         ]
         
         for setting in default_settings:

@@ -42,7 +42,10 @@ type CurrentSettings = {
 
 export default function AdminPage(): JSX.Element {
   const [starsPrice, setStarsPrice] = useState<string>("");
-  const [tonPrice, setTonPrice] = useState<string>("");
+  const [tonMarkupPercentage, setTonMarkupPercentage] = useState<string>("");
+  const [tonCacheMinutes, setTonCacheMinutes] = useState<string>("");
+  const [tonFallbackPrice, setTonFallbackPrice] = useState<string>("");
+  const [referralRegistrationBonus, setReferralRegistrationBonus] = useState<string>("");
   const [botBaseUrl, setBotBaseUrl] = useState<string>("");
   const [referralPrefix, setReferralPrefix] = useState<string>("");
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
@@ -83,7 +86,10 @@ export default function AdminPage(): JSX.Element {
   useEffect(() => {
     if (!currentSettings) return;
     setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
-    setTonPrice(normalizeToStringNumber(currentSettings.ton_price, "420.50"));
+    setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5"));
+  setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
+  setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420"));
+  setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
     setBotBaseUrl(currentSettings.bot_base_url || "");
     setReferralPrefix(currentSettings.referral_prefix || "");
     setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, ""));
@@ -140,7 +146,7 @@ export default function AdminPage(): JSX.Element {
   });
 
   const handleUpdatePrices = () => {
-    if (!starsPrice || !tonPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage || !referralRegistrationBonus) {
+    if (!starsPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage || !tonMarkupPercentage || !referralRegistrationBonus) {
       toast({ title: "Ошибка валидации", description: "Все поля должны быть заполнены", variant: "destructive" });
       return;
     }
@@ -162,7 +168,10 @@ export default function AdminPage(): JSX.Element {
 
     const payload: Record<string, string> = {
       stars_price: String(s),
-      ton_price: String(t),
+      ton_markup_percentage: String(parseNumberOrNaN(tonMarkupPercentage)),
+      ton_price_cache_minutes: String(parseNumberOrNaN(tonCacheMinutes)), 
+      ton_fallback_price: String(parseNumberOrNaN(tonFallbackPrice)),
+      referral_registration_bonus: String(parseNumberOrNaN(referralRegistrationBonus)),
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
       referral_bonus_percentage: String(rbp),
@@ -208,38 +217,123 @@ export default function AdminPage(): JSX.Element {
             </div>
           </motion.div>
 
-          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <h3 className="font-semibold mb-3 flex items-center"><Tag className="w-4 h-4 text-yellow-500 mr-2" />Управление ценами</h3>
-            <div className="space-y-3">
+          {/* Price Settings */}
+          <motion.div
+            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <h3 className="font-semibold mb-3 flex items-center">
+              <Tag className="w-4 h-4 text-green-500 mr-2" />
+              Цены
+            </h3>
+            <div className="space-y-4">
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за звезду (₽)</Label>
-                <Input type="text" value={starsPrice} onChange={(e) => setStarsPrice(e.target.value)} placeholder="1.50" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>Цена Stars (₽)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={starsPrice}
+                  onChange={(e) => setStarsPrice(e.target.value)}
+                  placeholder="1.50"
+                />
+              </div>
+              <Button
+                onClick={handleUpdatePrices}
+                disabled={updateSettingsMutation.isPending}
+                className="w-full"
+              >
+                {updateSettingsMutation.isPending
+                  ? "Обновляется..."
+                  : "Обновить настройки"}
+              </Button>
+            </div>
+          </motion.div>
+
+          {/* TON Dynamic Pricing */}
+          <motion.div
+            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <h3 className="font-semibold mb-3 flex items-center">
+              🚀 Динамическое ценообразование TON
+            </h3>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Label>Наценка (%)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={tonMarkupPercentage}
+                  onChange={(e) => setTonMarkupPercentage(e.target.value)}
+                  placeholder="5"
+                />
               </div>
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за TON (₽)</Label>
-                <Input type="text" value={tonPrice} onChange={(e) => setTonPrice(e.target.value)} placeholder="420.50" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>Обновление (мин)</Label>
+                <Input
+                  type="number"
+                  value={tonCacheMinutes}
+                  onChange={(e) => setTonCacheMinutes(e.target.value)}
+                  placeholder="15"
+                />
+              </div>
+              <div>
+                <Label>Резервная цена (₽)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={tonFallbackPrice}
+                  onChange={(e) => setTonFallbackPrice(e.target.value)}
+                  placeholder="420"
+                />
               </div>
             </div>
           </motion.div>
 
-          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg md:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <h3 className="font-semibold mb-3 flex items-center"><Tag className="w-4 h-4 text-blue-500 mr-2" />Реферальные настройки</h3>
+          {/* Referral Settings */}
+          <motion.div
+            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+          >
+            <h3 className="font-semibold mb-3 flex items-center">
+              <Shield className="w-4 h-4 text-blue-500 mr-2" />
+              Реферальные настройки
+            </h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">URL бота</Label>
-                <Input type="text" value={botBaseUrl} onChange={(e) => setBotBaseUrl(e.target.value)} placeholder="https://t.me/bot_name" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>URL бота</Label>
+                <Input
+                  value={botBaseUrl}
+                  onChange={(e) => setBotBaseUrl(e.target.value)}
+                  placeholder="https://t.me/bot_name"
+                />
               </div>
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Префикс рефералки</Label>
-                <Input type="text" value={referralPrefix} onChange={(e) => setReferralPrefix(e.target.value)} placeholder="startapp" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>Префикс реферальных ссылок</Label>
+                <Input
+                  value={referralPrefix}
+                  onChange={(e) => setReferralPrefix(e.target.value)}
+                  placeholder="ref"
+                />
               </div>
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Процент бонуса (%)</Label>
-                <Input type="text" value={referralBonusPercentage} onChange={(e) => setReferralBonusPercentage(e.target.value)} placeholder="5" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>Процент с покупок (%)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={referralBonusPercentage}
+                  onChange={(e) => setReferralBonusPercentage(e.target.value)}
+                  placeholder="5"
+                />
               </div>
-              {/* ✅ НОВОЕ ПОЛЕ: Награда за приглашение */}
               <div>
-                <Label>Награда за приглашение (звезды)</Label>
+                <Label>Награда за приглашение (звезды) 🎁</Label>
                 <Input
                   type="number"
                   value={referralRegistrationBonus}
@@ -249,56 +343,51 @@ export default function AdminPage(): JSX.Element {
               </div>
             </div>
           </motion.div>
-        </div>
 
-        <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-          <Button
-            onClick={handleUpdatePrices}
-            disabled={updateSettingsMutation.isPending}
-            className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white font-semibold py-3"
-            size="lg"
+          {/* Recent Transactions */}
+          <motion.div
+            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
           >
-            {updateSettingsMutation.isPending ? (
-              <>
-                <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
-                Сохраняем...
-              </>
-            ) : (
-              "Сохранить настройки"
-            )}
-          </Button>
-        </motion.div>
-
-        {/* Recent Transactions */}
-        {adminStats?.recentTransactions && adminStats.recentTransactions.length > 0 && (
-          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
             <h3 className="font-semibold mb-3 flex items-center">
-              <History className="w-4 h-4 text-purple-500 mr-2" />
+              <History className="w-4 h-4 text-[#4E7FFF] mr-2" />
               Последние транзакции
             </h3>
-            <div className="space-y-2">
-              {adminStats.recentTransactions.slice(0, 5).map((transaction) => (
-                <div key={transaction.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg">
-                  <div className="flex-1">
-                    <p className="font-medium text-sm">{transaction.username || 'Неизвестный пользователь'}</p>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">{transaction.description || 'Нет описания'}</p>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {adminStats?.recentTransactions?.length ? (
+                adminStats.recentTransactions.map((transaction, index) => (
+                  <div
+                    key={`${transaction.id}-${index}`}
+                    className="flex justify-between items-center p-2 bg-white dark:bg-[#1A1A1C] rounded-lg"
+                  >
+                    <div>
+                      <p className="font-medium">{transaction.username || 'Неизвестный'}</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {transaction.description || 'Транзакция'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-sm font-semibold ${
+                        transaction.status === 'completed' ? 'text-green-500' : 
+                        transaction.status === 'failed' ? 'text-red-500' : 'text-yellow-500'
+                      }`}>
+                        {transaction.status === 'completed' ? 'Завершено' : 
+                        transaction.status === 'failed' ? 'Не удалось' : 'В процессе'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {transaction.createdAt ? new Date(transaction.createdAt).toLocaleDateString() : ''}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <span className={`inline-block px-2 py-1 text-xs rounded-full ${
-                      transaction.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                      transaction.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
-                      'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                    }`}>
-                      {transaction.status === 'completed' ? 'Успешно' : 
-                       transaction.status === 'pending' ? 'В обработке' : 'Ошибка'}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-gray-500 text-center py-4">Нет последних транзакций</p>
+              )}
             </div>
           </motion.div>
-        )}
+        </div>
       </main>
     </div>
-  );
-}
+  );}
