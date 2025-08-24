@@ -362,6 +362,23 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
             )}
           </div>
 
+          {/* Amount Input */}
+          <div>
+            <Label className="text-gray-600 dark:text-gray-400">
+              Количество {selectedCurrency === 'stars' ? 'звезд' : 'TON'}
+            </Label>
+            <Input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder={`От ${selectedCurrency === 'stars' ? '50' : '0.1'}`}
+              min={selectedCurrency === 'stars' ? 50 : 0.1}
+              step={selectedCurrency === 'stars' ? 1 : 0.1}
+              className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
+              disabled={isProcessing}
+            />
+          </div>
+
           {/* Quick Buy Options */}
           <div className="space-y-2">
             <Label className="text-gray-600 dark:text-gray-400">Быстрый выбор</Label>
@@ -381,24 +398,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
             </div>
           </div>
 
-          {/* Amount Input */}
-          <div>
-            <Label className="text-gray-600 dark:text-gray-400">
-              Количество {selectedCurrency === 'stars' ? 'звезд' : 'TON'}
-            </Label>
-            <Input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder={`От ${selectedCurrency === 'stars' ? '50' : '0.1'}`}
-              min={selectedCurrency === 'stars' ? 50 : 0.1}
-              step={selectedCurrency === 'stars' ? 1 : 0.1}
-              className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
-              disabled={isProcessing}
-            />
-          </div>
-
-          {/* Price Display - ОБНОВЛЕННАЯ ВЕРСИЯ */}
+          {/* Price Display */}
           {priceCalculation && (
             <motion.div
               className="bg-gradient-to-r from-[#4E7FFF]/10 to-purple-500/10 rounded-lg p-4 border border-white/10"
@@ -411,23 +411,23 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
                 <>
                   {priceCalculation.official_price && (
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-gray-600 dark:text-gray-400">Original Cost:</span>
+                      <span className="text-gray-600 dark:text-gray-400">Стоимость:</span>
                       <span className="font-semibold line-through text-red-500">
-                        ₽{parseFloat(priceCalculation.official_price).toLocaleString()} (1.8₽/star)
+                        ₽{parseFloat(priceCalculation.official_price).toLocaleString()} (за офф стоимость)
                       </span>
                     </div>
                   )}
-                  {priceCalculation.savings_amount && priceCalculation.savings_percentage && (
+                  {priceCalculation.savings_percentage && (
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-gray-600 dark:text-gray-400">Savings:</span>
+                      <span className="text-gray-600 dark:text-gray-400">Скидка:</span>
                       <span className="font-semibold text-green-500">
-                        <strong>{priceCalculation.savings_percentage}% (₽{parseFloat(priceCalculation.savings_amount).toLocaleString()})</strong>
+                        {priceCalculation.savings_percentage}%
                       </span>
                     </div>
                   )}
                   <hr className="border-gray-200 dark:border-white/10 my-2" />
                   <div className="flex justify-between items-center">
-                    <span className="font-semibold">Total:</span>
+                    <span className="font-semibold">Итого:</span>
                     <motion.span
                       className="font-bold text-lg text-[#4E7FFF]"
                       initial={{ scale: 1 }}
