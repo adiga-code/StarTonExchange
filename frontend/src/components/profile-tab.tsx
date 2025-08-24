@@ -150,26 +150,20 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
     
     const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code || '12345678'}`;
     const shareText = referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON!';
-    const fullMessage = `${shareText}\n\n${referralLink}`;
+    
+    // Форматируем так, чтобы после добавления @bot_username получился нужный порядок
+    const fullMessage = `\n${shareText}\n\n${referralLink}`;
 
-    // Проверяем доступность Telegram WebApp API
     if (window.Telegram?.WebApp) {
-      // Используем switchInlineQuery для открытия выбора чата
       window.Telegram.WebApp.switchInlineQuery(fullMessage, ['users', 'groups', 'channels']);
     } else {
-      // Fallback: используем обычный share API браузера
       if (navigator.share) {
         navigator.share({
-          title: 'Stars Exchange',
+          title: 'Stars Exchange', 
           text: shareText,
           url: referralLink
-        }).catch(err => {
-          console.log('Error sharing:', err);
-          // Если не получилось поделиться, копируем в буфер
-          copyReferralLink();
-        });
+        }).catch(() => copyReferralLink());
       } else {
-        // Если share API не поддерживается, копируем ссылку
         copyReferralLink();
       }
     }
