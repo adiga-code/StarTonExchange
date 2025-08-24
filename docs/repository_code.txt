@@ -1093,19 +1093,32 @@ async def calculate_purchase(
             "ton": float(await storage.get_cached_setting("ton_price")),
         }
         
-        markup = float(await storage.get_cached_setting("markup_percentage")) / 100
+        # Рассчитываем цену без наценки
+        total_price = purchase_data.amount * prices[purchase_data.currency]
         
-        base_price = purchase_data.amount * prices[purchase_data.currency]
-        markup_amount = base_price * markup
-        total_price = base_price + markup_amount
-        
-        return PurchaseCalculateResponse(
-            base_price=f"{base_price:.2f}",
-            markup_amount=f"{markup_amount:.2f}",
-            total_price=f"{total_price:.2f}",
-            currency=purchase_data.currency,
-            amount=purchase_data.amount
-        )
+        # Для звезд добавляем информацию об экономии
+        if purchase_data.currency == "stars":
+            OFFICIAL_STARS_PRICE = 1.8  # Константа официальной цены
+            official_total = purchase_data.amount * OFFICIAL_STARS_PRICE
+            savings = official_total - total_price
+            savings_percentage = (savings / official_total) * 100 if official_total > 0 else 0
+            
+            return PurchaseCalculateResponse(
+                base_price=f"{total_price:.2f}",
+                currency=purchase_data.currency,
+                amount=purchase_data.amount,
+                official_price=f"{official_total:.2f}",
+                savings_amount=f"{savings:.2f}",
+                savings_percentage=f"{savings_percentage:.1f}"
+            )
+        else:
+            # Для TON только базовая цена
+            return PurchaseCalculateResponse(
+                base_price=f"{total_price:.2f}",
+                currency=purchase_data.currency,
+                amount=purchase_data.amount
+            )
+            
     except Exception as e:
         logger.error(f"Error calculating price: {e}")
         raise HTTPException(status_code=500, detail="Failed to calculate price")
@@ -1121,9 +1134,33 @@ async def make_purchase(
         if purchase_data.currency not in ['stars', 'ton']:
             raise HTTPException(status_code=400, detail="Invalid currency. Must be 'stars' or 'ton'")
         
+        # Validate minimum amounts
+        min_amounts = {"stars": 50, "ton": 0.1}
+        if purchase_data.amount < min_amounts[purchase_data.currency]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Minimum amount for {purchase_data.currency} is {min_amounts[purchase_data.currency]}"
+            )
+        
         robokassa = get_robokassa()
         if not robokassa:
             raise HTTPException(status_code=500, detail="Payment system not configured")
+        
+        # Get current prices without markup
+        prices = {
+            "stars": float(await storage.get_cached_setting("stars_price")),
+            "ton": float(await storage.get_cached_setting("ton_price")),
+        }
+        
+        # Calculate total price without markup
+        calculated_total = purchase_data.amount * prices[purchase_data.currency]
+        
+        # Verify that the sent rub_amount matches our calculation
+        if abs(calculated_total - purchase_data.rub_amount) > 0.01:  # Allow 1 kopeck difference
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Price mismatch. Expected: {calculated_total:.2f}, got: {purchase_data.rub_amount:.2f}"
+            )
         
         # Generate unique invoice ID
         import uuid
@@ -1132,14 +1169,15 @@ async def make_purchase(
         # Create transaction record
         transaction_data = TransactionCreate(
             user_id=current_user.id,
-            type="purchase",  # Унифицированный тип для всех покупок
+            type="purchase",
             currency=purchase_data.currency,
             amount=Decimal(str(purchase_data.amount)),
             rub_amount=Decimal(str(purchase_data.rub_amount)),
             status="pending",
-            description=f"Purchase {purchase_data.amount} {purchase_data.currency}",
+            description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
             payment_system="robokassa",
-            invoice_id=invoice_id
+            invoice_id=invoice_id,
+            recipient_username=purchase_data.username
         )
         
         transaction = await storage.create_transaction(transaction_data)
@@ -1148,14 +1186,14 @@ async def make_purchase(
         payment_url = robokassa.create_payment_url(
             invoice_id=invoice_id,
             amount=Decimal(str(purchase_data.rub_amount)),
-            description=f"Purchase {purchase_data.amount} {purchase_data.currency}",
+            description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
             user_email=f"{current_user.telegram_id}@telegram.user"
         )
         
         # Update transaction with payment URL
         await storage.update_transaction(transaction.id, {"payment_url": payment_url})
         
-        logger.info(f"Created payment for user {current_user.telegram_id}: {purchase_data.rub_amount} RUB")
+        logger.info(f"Created payment for user {current_user.telegram_id}: {purchase_data.rub_amount} RUB for {purchase_data.amount} {purchase_data.currency}")
         
         return PaymentCreateResponse(
             transaction_id=transaction.id,
@@ -1547,8 +1585,8 @@ async def update_admin_settings(
             await storage.update_setting("stars_price", settings.stars_price)
         if settings.ton_price:
             await storage.update_setting("ton_price", settings.ton_price)
-        if settings.markup_percentage:
-            await storage.update_setting("markup_percentage", settings.markup_percentage)
+        # if settings.markup_percentage:
+        #     await storage.update_setting("markup_percentage", settings.markup_percentage)
         if settings.bot_base_url:
             await storage.update_setting("bot_base_url", settings.bot_base_url)
         if settings.referral_prefix:
@@ -1796,7 +1834,7 @@ async def get_admin_settings(storage: Storage = Depends(get_storage)):
     return {
         "stars_price": await storage.get_cached_setting("stars_price"),
         "ton_price": await storage.get_cached_setting("ton_price"),
-        "markup_percentage": await storage.get_cached_setting("markup_percentage"),
+        # "markup_percentage": await storage.get_cached_setting("markup_percentage"),
         "bot_base_url": await storage.get_cached_setting("bot_base_url"),
         "referral_prefix": await storage.get_cached_setting("referral_prefix"),
         "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage")
@@ -2396,11 +2434,13 @@ class PurchaseCalculate(BaseModel):
     amount: float = Field(..., gt=0)
 
 class PurchaseCalculateResponse(BaseModel):
-    base_price: str
-    markup_amount: str
-    total_price: str
+    base_price: str  # Цена по вашему курсу (итоговая цена)
     currency: str
     amount: float
+    # Только для звезд:
+    official_price: Optional[str] = None  # Официальная цена (1.8 * количество)
+    savings_amount: Optional[str] = None  # Экономия в рублях
+    savings_percentage: Optional[str] = None  # Экономия в процентах
 
 class PurchaseRequest(BaseModel):
     currency: str
@@ -2429,7 +2469,7 @@ class AdminStats(BaseModel):
 class AdminSettingsUpdate(BaseModel):
     stars_price: Optional[str] = None
     ton_price: Optional[str] = None
-    markup_percentage: Optional[str] = None
+    #markup_percentage: Optional[str] = None
     bot_base_url: Optional[str] = None
     referral_prefix: Optional[str] = None
     referral_bonus_percentage: Optional[str] = None
@@ -4952,6 +4992,16 @@ interface PaymentResponse {
  status: string;
 }
 
+interface PriceCalculation {
+  base_price: string;
+  currency: string;
+  amount: number;
+  // Только для звезд:
+  official_price?: string;
+  savings_amount?: string;
+  savings_percentage?: string;
+}
+
 export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabProps) {
  const [selectedCurrency, setSelectedCurrency] = useState<Currency>('stars');
  const [amount, setAmount] = useState('');
@@ -5009,7 +5059,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
  }, [recipientUsername]);
 
  // Calculate price
- const { data: priceCalculation } = useQuery({
+ const { data: priceCalculation } = useQuery<PriceCalculation>({
    queryKey: ['/api/purchase/calculate', selectedCurrency, amount],
    enabled: !!amount && parseFloat(amount) > 0,
    queryFn: async () => {
@@ -5117,6 +5167,14 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
  const handleCurrencySelect = (currency: Currency) => {
    hapticFeedback('light');
    setSelectedCurrency(currency);
+   
+   // Сбрасываем amount при смене валюты, чтобы избежать некорректных значений
+   const currentAmount = parseFloat(amount);
+   const minAmounts = { stars: 50, ton: 0.1 };
+   
+   if (amount && currentAmount < minAmounts[currency]) {
+     setAmount('');
+   }
  };
 
  const handleQuickBuy = (quickAmount: number) => {
@@ -5138,7 +5196,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       await purchaseMutation.mutateAsync({
         currency: selectedCurrency,
         amount: parseFloat(amount),
-        rub_amount: parseFloat(priceCalculation?.total_price || '0'),
+        rub_amount: parseFloat(priceCalculation?.base_price || '0'),
         username: userPhoto ? recipientUsername : undefined,
       });
     } catch (error) {
@@ -5320,26 +5378,59 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
              animate={{ opacity: 1, scale: 1 }}
              transition={{ duration: 0.3 }}
            >
-             <div className="flex justify-between items-center mb-2">
-               <span className="text-gray-600 dark:text-gray-400">Стоимость:</span>
-               <span className="font-semibold">₽{parseFloat(priceCalculation.base_price).toLocaleString()}</span>
-             </div>
-             <div className="flex justify-between items-center mb-2">
-               <span className="text-gray-600 dark:text-gray-400">Наценка:</span>
-               <span className="font-semibold text-[#4E7FFF]">₽{parseFloat(priceCalculation.markup_amount).toLocaleString()}</span>
-             </div>
-             <hr className="border-gray-200 dark:border-white/10 my-2" />
-             <div className="flex justify-between items-center">
-               <span className="font-semibold">Итого:</span>
-               <motion.span
-                 className="font-bold text-lg text-[#4E7FFF]"
-                 initial={{ scale: 1 }}
-                 animate={{ scale: [1, 1.05, 1] }}
-                 transition={{ duration: 0.3 }}
-               >
-                 ₽{parseFloat(priceCalculation.total_price).toLocaleString()}
-               </motion.span>
-             </div>
+             {selectedCurrency === 'stars' ? (
+               // Отображение для звезд с экономией
+               <>
+                 {priceCalculation.official_price && (
+                   <div className="flex justify-between items-center mb-2">
+                     <span className="text-gray-600 dark:text-gray-400">Стоимость:</span>
+                     <span className="font-semibold line-through text-red-500">
+                       ₽{parseFloat(priceCalculation.official_price).toLocaleString()}
+                     </span>
+                   </div>
+                 )}
+                 {priceCalculation.savings_amount && (
+                   <div className="flex justify-between items-center mb-2">
+                     <span className="text-gray-600 dark:text-gray-400">Скидка:</span>
+                     <span className="font-semibold text-green-500">
+                       ₽{parseFloat(priceCalculation.savings_amount).toLocaleString()}
+                     </span>
+                   </div>
+                 )}
+                 <hr className="border-gray-200 dark:border-white/10 my-2" />
+                 <div className="flex justify-between items-center">
+                   <span className="font-semibold">Итого:</span>
+                   <motion.span
+                     className="font-bold text-lg text-[#4E7FFF]"
+                     initial={{ scale: 1 }}
+                     animate={{ scale: [1, 1.05, 1] }}
+                     transition={{ duration: 0.3 }}
+                   >
+                     ₽{parseFloat(priceCalculation.base_price).toLocaleString()}
+                   </motion.span>
+                 </div>
+               </>
+             ) : (
+               // Отображение для TON - только стоимость и итого
+               <>
+                 <div className="flex justify-between items-center mb-2">
+                   <span className="text-gray-600 dark:text-gray-400">Стоимость:</span>
+                   <span className="font-semibold">₽{parseFloat(priceCalculation.base_price).toLocaleString()}</span>
+                 </div>
+                 <hr className="border-gray-200 dark:border-white/10 my-2" />
+                 <div className="flex justify-between items-center">
+                   <span className="font-semibold">Итого:</span>
+                   <motion.span
+                     className="font-bold text-lg text-[#4E7FFF]"
+                     initial={{ scale: 1 }}
+                     animate={{ scale: [1, 1.05, 1] }}
+                     transition={{ duration: 0.3 }}
+                   >
+                     ₽{parseFloat(priceCalculation.base_price).toLocaleString()}
+                   </motion.span>
+                 </div>
+               </>
+             )}
            </motion.div>
          )}
 
@@ -5411,7 +5502,6 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
    </div>
  );
 }
-
 
 ================================================================================
 FILE: frontend\src\components\loading-modal.tsx
@@ -13211,7 +13301,6 @@ type AdminStats = {
 type CurrentSettings = {
   stars_price?: string | number;
   ton_price?: string | number;
-  markup_percentage?: string | number;
   bot_base_url?: string;
   referral_prefix?: string;
   referral_bonus_percentage?: string | number;
@@ -13220,7 +13309,6 @@ type CurrentSettings = {
 export default function AdminPage(): JSX.Element {
   const [starsPrice, setStarsPrice] = useState<string>("");
   const [tonPrice, setTonPrice] = useState<string>("");
-  const [markupPercentage, setMarkupPercentage] = useState<string>("5");
   const [botBaseUrl, setBotBaseUrl] = useState<string>("");
   const [referralPrefix, setReferralPrefix] = useState<string>("");
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
@@ -13260,9 +13348,8 @@ export default function AdminPage(): JSX.Element {
 
   useEffect(() => {
     if (!currentSettings) return;
-    setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "2.30"));
+    setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
     setTonPrice(normalizeToStringNumber(currentSettings.ton_price, "420.50"));
-    setMarkupPercentage(normalizeToStringNumber(currentSettings.markup_percentage, "5"));
     setBotBaseUrl(currentSettings.bot_base_url || "");
     setReferralPrefix(currentSettings.referral_prefix || "");
     setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, ""));
@@ -13318,21 +13405,20 @@ export default function AdminPage(): JSX.Element {
   });
 
   const handleUpdatePrices = () => {
-    if (!starsPrice || !tonPrice || !markupPercentage || !botBaseUrl || !referralPrefix || !referralBonusPercentage) {
+    if (!starsPrice || !tonPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage) {
       toast({ title: "Ошибка валидации", description: "Все поля должны быть заполнены", variant: "destructive" });
       return;
     }
 
     const s = parseNumberOrNaN(starsPrice);
     const t = parseNumberOrNaN(tonPrice);
-    const m = parseNumberOrNaN(markupPercentage);
     const rbp = parseNumberOrNaN(referralBonusPercentage);
 
-    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(m) || Number.isNaN(rbp)) {
+    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(rbp)) {
       toast({ title: "Ошибка валидации", description: "Пожалуйста, введите корректные числовые значения.", variant: "destructive" });
       return;
     }
-    if (s <= 0 || t <= 0 || m < 0 || rbp < 0) {
+    if (s <= 0 || t <= 0 || rbp < 0) {
       toast({ title: "Ошибка валидации", description: "Цены и проценты должны быть положительными числами.", variant: "destructive" });
       return;
     }
@@ -13340,7 +13426,6 @@ export default function AdminPage(): JSX.Element {
     const payload: Record<string, string> = {
       stars_price: String(s),
       ton_price: String(t),
-      markup_percentage: String(m),
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
       referral_bonus_percentage: String(rbp),
@@ -13391,15 +13476,11 @@ export default function AdminPage(): JSX.Element {
             <div className="space-y-3">
               <div>
                 <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за звезду (₽)</Label>
-                <Input type="text" value={starsPrice} onChange={(e) => setStarsPrice(e.target.value)} placeholder="2.30" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Input type="text" value={starsPrice} onChange={(e) => setStarsPrice(e.target.value)} placeholder="1.50" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
               <div>
                 <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за TON (₽)</Label>
                 <Input type="text" value={tonPrice} onChange={(e) => setTonPrice(e.target.value)} placeholder="420.50" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
-              </div>
-              <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Наценка (%)</Label>
-                <Input type="text" value={markupPercentage} onChange={(e) => setMarkupPercentage(e.target.value)} placeholder="5" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
             </div>
           </motion.div>
@@ -13412,46 +13493,64 @@ export default function AdminPage(): JSX.Element {
                 <Input type="text" value={botBaseUrl} onChange={(e) => setBotBaseUrl(e.target.value)} placeholder="https://t.me/bot_name" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Префикс реферальных ссылок</Label>
-                <Input type="text" value={referralPrefix} onChange={(e) => setReferralPrefix(e.target.value)} placeholder="ref" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label className="text-sm text-gray-600 dark:text-gray-400">Префикс рефералки</Label>
+                <Input type="text" value={referralPrefix} onChange={(e) => setReferralPrefix(e.target.value)} placeholder="startapp" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
-              <div className="col-span-2">
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Процент реферального бонуса (%)</Label>
-                <Input type="text" value={referralBonusPercentage} onChange={(e) => setReferralBonusPercentage(e.target.value)} placeholder="10" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+              <div>
+                <Label className="text-sm text-gray-600 dark:text-gray-400">Процент бонуса (%)</Label>
+                <Input type="text" value={referralBonusPercentage} onChange={(e) => setReferralBonusPercentage(e.target.value)} placeholder="5" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
-            </div>
-          </motion.div>
-
-          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg md:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <h3 className="font-semibold mb-3 flex items-center"><History className="w-4 h-4 text-[#4E7FFF] mr-2" />Последние транзакции</h3>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {adminStats?.recentTransactions?.length ? (
-                adminStats.recentTransactions.map((tx) => (
-                  <div key={tx.id} className="flex items-center justify-between py-2 border-b border-gray-200 dark:border-white/10 last:border-b-0">
-                    <div>
-                      <p className="font-medium">{tx.username}</p>
-                      <p className="text-gray-600 dark:text-gray-400 text-sm">{tx.description}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`font-medium ${tx.status === "completed" ? "text-green-500" : tx.status === "failed" ? "text-red-500" : "text-yellow-500"}`}>
-                        {tx.status === "completed" ? "Успешно" : tx.status === "failed" ? "Ошибка" : "В обработке"}
-                      </p>
-                      <p className="text-gray-600 dark:text-gray-400 text-xs">
-                        {tx.createdAt ? new Date(tx.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : ""}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-gray-500 dark:text-gray-400 text-center py-4">Транзакций пока нет</p>
-              )}
             </div>
           </motion.div>
         </div>
 
-        <Button onClick={handleUpdatePrices} disabled={updateSettingsMutation.isLoading} className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white fixed bottom-4 left-4 right-4">
-          {updateSettingsMutation.isLoading ? "Обновление..." : "Обновить все настройки"}
-        </Button>
+        <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+          <Button
+            onClick={handleUpdatePrices}
+            disabled={updateSettingsMutation.isPending}
+            className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white font-semibold py-3"
+            size="lg"
+          >
+            {updateSettingsMutation.isPending ? (
+              <>
+                <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
+                Сохраняем...
+              </>
+            ) : (
+              "Сохранить настройки"
+            )}
+          </Button>
+        </motion.div>
+
+        {/* Recent Transactions */}
+        {adminStats?.recentTransactions && adminStats.recentTransactions.length > 0 && (
+          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+            <h3 className="font-semibold mb-3 flex items-center">
+              <History className="w-4 h-4 text-purple-500 mr-2" />
+              Последние транзакции
+            </h3>
+            <div className="space-y-2">
+              {adminStats.recentTransactions.slice(0, 5).map((transaction) => (
+                <div key={transaction.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg">
+                  <div className="flex-1">
+                    <p className="font-medium text-sm">{transaction.username || 'Неизвестный пользователь'}</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">{transaction.description || 'Нет описания'}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className={`inline-block px-2 py-1 text-xs rounded-full ${
+                      transaction.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                      transaction.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                      'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                    }`}>
+                      {transaction.status === 'completed' ? 'Успешно' : 
+                       transaction.status === 'pending' ? 'В обработке' : 'Ошибка'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </main>
     </div>
   );
