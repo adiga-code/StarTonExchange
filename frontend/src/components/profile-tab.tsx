@@ -149,23 +149,20 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
     hapticFeedback('medium');
 
     const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code}`;
-    const botUsername = referralConfig?.bot_username || '@YourBotUsername'; // Укажите username бота
     const shareText = referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON!';
-    
-    // Форматируем сообщение в HTML
-    const fullMessage = `${shareText}\n\n<a href="https://t.me/${botUsername.replace('@', '')}">${botUsername}</a>`;
+    const fullMessage = `${shareText}\n\n${referralLink}`;
 
     if (window.Telegram?.WebApp) {
-      // Используем openTelegramLink с HTML
+      // Используем openTelegramLink вместо switchInlineQuery
       window.Telegram.WebApp.openTelegramLink(
-        `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(fullMessage)}`
+        `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(shareText)}`
       );
     } else {
       // Резерв для браузера
       if (navigator.share) {
         navigator.share({
           title: 'Stars Exchange',
-          text: fullMessage, // В браузере HTML не отрендерится, будет обычный текст
+          text: fullMessage,
         }).catch(() => copyReferralLink());
       } else {
         copyReferralLink();
