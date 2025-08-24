@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from database import AsyncSessionLocal, init_db, init_default_data
 from models import Setting
 from storage import Storage
-from ton_price import ton_price_service
+from ton_price_service import ton_price_service
 from sqlalchemy import select
 
 # Настройка логирования
