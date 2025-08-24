@@ -53,13 +53,25 @@ export default function AdminPage(): JSX.Element {
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
 
-  const normalizeToStringNumber = (v: any, fallback = ""): string => {
-    if (v === null || v === undefined) return fallback;
-    const s = String(v).trim();
-    if (!s) return fallback;
-    if (s.toLowerCase() === "none") return fallback;
-    const n = Number(String(s).replace(",", "."));
-    return Number.isFinite(n) ? String(n) : fallback;
+  const normalizeToStringNumber = (value: any, fallback: string = ""): string => {
+    // Обработка null, undefined, пустых строк
+    if (value === null || value === undefined || value === "") {
+      return fallback;
+    }
+    // Если это уже строка, проверяем что она валидна
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") return fallback;
+      // Проверяем что это валидное число
+      const num = parseFloat(trimmed.replace(",", "."));
+      return Number.isFinite(num) ? trimmed : fallback;
+    }
+    // Если это число
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+    // Во всех остальных случаях возвращаем fallback
+    return fallback;
   };
 
   const parseNumberOrNaN = (s: string) => {
@@ -84,14 +96,21 @@ export default function AdminPage(): JSX.Element {
 
   useEffect(() => {
     if (!currentSettings) return;
+    
+    console.log("🔍 Загружаемые настройки:", currentSettings);
+    
+    // Используем улучшенную нормализацию с правильными fallback значениями
     setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
-    setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5"));
+    setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5.0"));
     setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
-    setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420"));
-    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
-    setBotBaseUrl(currentSettings.bot_base_url || "");
-    setReferralPrefix(currentSettings.referral_prefix || "");
-    setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, ""));
+    setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420.0"));
+    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25.0"));
+    
+    setBotBaseUrl(currentSettings.bot_base_url || "https://t.me/starsguru_official_bot");
+    setReferralPrefix(currentSettings.referral_prefix || "ref");
+    setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, "5.0"));
+    
+    console.log("✅ Настройки инициализированы");
   }, [currentSettings]);
 
   const { data: adminStats } = useQuery<AdminStats, Error>({
@@ -109,43 +128,60 @@ export default function AdminPage(): JSX.Element {
 
   const updateSettingsMutation = useMutation({
     mutationFn: async (payload: Record<string, any>) => {
-      console.log("🔥 [mutationFn] sending payload:", payload);
+      console.log("🔥 [mutationFn] отправляем данные:", payload);
+      
       const res = await fetch("/api/admin/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      
       const text = await res.text().catch(() => "");
+      console.log(`📡 Ответ сервера (${res.status}):`, text);
+      
       let json;
       try {
         json = text ? JSON.parse(text) : null;
       } catch {
         json = text;
       }
+      
       if (!res.ok) {
-        console.error("❌ Response (non-ok):", res.status, json);
-        throw new Error(`Update failed: ${res.status} ${JSON.stringify(json)}`);
+        console.error("❌ Ошибка ответа:", res.status, json);
+        throw new Error(`Ошибка обновления: ${res.status} ${JSON.stringify(json)}`);
       }
+      
       return json;
     },
     onSuccess: () => {
+      console.log("✅ Настройки успешно обновлены");
       hapticFeedback("success");
       toast({ title: "Настройки обновлены", description: "Цены успешно обновлены" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-      queryClient.refetchQueries({ queryKey: ["/api/admin/settings/current"] });
-      queryClient.refetchQueries({ queryKey: ["/api/admin/stats"] });
     },
     onError: (err: any) => {
-      console.error("❌ Update settings error:", err);
+      console.error("❌ Ошибка обновления настроек:", err);
       hapticFeedback("error");
-      toast({ title: "Ошибка", description: "Не удалось обновить настройки", variant: "destructive" });
+      toast({ 
+        title: "Ошибка", 
+        description: `Не удалось обновить настройки: ${err.message}`, 
+        variant: "destructive" 
+      });
     },
   });
 
+  // Исправляем синтаксическую ошибку в валидации
   const handleUpdatePrices = () => {
-    if (!starsPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage || !tonMarkupPercentage || !referralRegistrationBonus) {
-      toast({ title: "Ошибка валидации", description: "Все поля должны быть заполнены", variant: "destructive" });
+    // Добавляем проверку всех TON полей
+    if (!starsPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage || 
+        !tonMarkupPercentage || !referralRegistrationBonus || 
+        !tonCacheMinutes || !tonFallbackPrice) {
+      toast({ 
+        title: "Ошибка валидации", 
+        description: "Все поля должны быть заполнены", 
+        variant: "destructive" 
+      });
       return;
     }
 
@@ -156,29 +192,37 @@ export default function AdminPage(): JSX.Element {
     const tfp = parseNumberOrNaN(tonFallbackPrice);
     const rrb = parseNumberOrNaN(referralRegistrationBonus);
 
-    if (Number.isNaN(s) || Number.isNaN(rbp) || Number.isNaN(tmp) || Number.isNaN(tcm) || Number.isNaN(tfp) || Number.isNaN(rrb)) {
-      toast({ title: "Ошибка валидации", description: "Пожалуйста, введите корректные числовые значения.", variant: "destructive" });
+    if (Number.isNaN(s) || Number.isNaN(rbp) || Number.isNaN(tmp) || 
+        Number.isNaN(tcm) || Number.isNaN(tfp) || Number.isNaN(rrb)) {
+      toast({ 
+        title: "Ошибка валидации", 
+        description: "Пожалуйста, введите корректные числовые значения.", 
+        variant: "destructive" 
+      });
       return;
     }
     
+    // ✅ ИСПРАВЛЕНО: добавлена недостающая кавычка и правильные условия
     if (s <= 0 || rbp < 0 || tmp < 0 || tcm <= 0 || tfp <= 0 || rrb < 0) {
-      toast({ title: "Ошибка валидации", description: "Все значения должны быть положительными.", variant: "destructive" });
+      toast({ 
+        title: "Ошибка валидации", 
+        description: "Все значения должны быть положительными.", 
+        variant: "destructive" 
+      });
       return;
     }
 
-    const payload: Record<string, string> = {
-      stars_price: String(s),
+    // ✅ Отправляем правильные поля
+    updateSettingsMutation.mutate({
+      stars_price: starsPrice,
+      ton_markup_percentage: tonMarkupPercentage,
+      ton_price_cache_minutes: tonCacheMinutes,
+      ton_fallback_price: tonFallbackPrice,
+      referral_registration_bonus: referralRegistrationBonus,
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
-      referral_bonus_percentage: String(rbp),
-      ton_markup_percentage: String(tmp),
-      ton_price_cache_minutes: String(tcm),
-      ton_fallback_price: String(tfp),
-      referral_registration_bonus: String(rrb),
-    };
-
-    console.log("🔥 Frontend prepared payload:", payload);
-    updateSettingsMutation.mutate(payload);
+      referral_bonus_percentage: referralBonusPercentage,
+    });
   };
 
   return (

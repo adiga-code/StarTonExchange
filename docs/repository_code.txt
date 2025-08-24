@@ -1606,16 +1606,8 @@ async def update_admin_settings(
             await storage.update_setting("stars_price", settings.stars_price)
         else:
             logger.info(f"❌ Skipping stars_price (value: '{settings.stars_price}')")
-            
-        if settings.ton_price:
-            logger.info(f"✅ Updating ton_price to: {settings.ton_price}")
-            await storage.update_setting("ton_price", settings.ton_price)
-        else:
-            logger.info(f"❌ Skipping ton_price (value: '{settings.ton_price}')")
         if settings.stars_price:
             await storage.update_setting("stars_price", settings.stars_price)
-        if settings.ton_price:
-            await storage.update_setting("ton_price", settings.ton_price)
         # if settings.markup_percentage:
         #     await storage.update_setting("markup_percentage", settings.markup_percentage)
         if settings.bot_base_url:
@@ -1627,7 +1619,12 @@ async def update_admin_settings(
         if settings.referral_registration_bonus:
             await storage.update_setting("referral_registration_bonus", settings.referral_registration_bonus)
             logger.info(f"✅ Updating referral_registration_bonus to: {settings.referral_registration_bonus}")
-        
+        if settings.ton_markup_percentage:
+            await storage.update_setting("ton_markup_percentage", settings.ton_markup_percentage)
+        if settings.ton_price_cache_minutes:
+            await storage.update_setting("ton_price_cache_minutes", settings.ton_price_cache_minutes)
+        if settings.ton_fallback_price:
+            await storage.update_setting("ton_fallback_price", settings.ton_fallback_price)
         return {"success": True}
     except Exception as e:
         logger.error(f"Error updating settings: {e}")
@@ -1874,7 +1871,6 @@ async def get_admin_settings(storage: Storage = Depends(get_storage)):
         "bot_base_url": await storage.get_cached_setting("bot_base_url"),
         "referral_prefix": await storage.get_cached_setting("referral_prefix"),
         "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage"),
-        "referral_registration_bonus": await storage.get_cached_setting("referral_registration_bonus")
     }
 
 @app.get("/api/config/referral")
@@ -2514,7 +2510,6 @@ class AdminSettingsUpdate(BaseModel):
     bot_base_url: Optional[str] = None
     referral_prefix: Optional[str] = None
     referral_bonus_percentage: Optional[str] = None
-    referral_registration_bonus: Optional[str] = None
 
 # Payment schemas
 class PaymentCreateResponse(BaseModel):
@@ -3883,7 +3878,7 @@ FILE: frontend\package-lock.json
   "version": "1.0.0",
   "lockfileVersion": 3,
   "requires": true,
-  "packages": {  }
+  "packages": {}
 }
 
 
@@ -13611,13 +13606,12 @@ export default function AdminPage(): JSX.Element {
     if (!currentSettings) return;
     setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
     setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5"));
-  setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
-  setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420"));
-  setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
+    setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
+    setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420"));
+    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
     setBotBaseUrl(currentSettings.bot_base_url || "");
     setReferralPrefix(currentSettings.referral_prefix || "");
     setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, ""));
-    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
   }, [currentSettings]);
 
   const { data: adminStats } = useQuery<AdminStats, Error>({
@@ -13676,32 +13670,34 @@ export default function AdminPage(): JSX.Element {
     }
 
     const s = parseNumberOrNaN(starsPrice);
-    const t = parseNumberOrNaN(tonPrice);
     const rbp = parseNumberOrNaN(referralBonusPercentage);
-    const rrb = parseNumberOrNaN(referralRegistrationBonus); // ← НОВОЕ
+    const tmp = parseNumberOrNaN(tonMarkupPercentage);
+    const tcm = parseNumberOrNaN(tonCacheMinutes);
+    const tfp = parseNumberOrNaN(tonFallbackPrice);
+    const rrb = parseNumberOrNaN(referralRegistrationBonus);
 
-    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(rbp) || Number.isNaN(rrb)) {
+    if (Number.isNaN(s) || Number.isNaN(rbp) || Number.isNaN(tmp) || Number.isNaN(tcm) || Number.isNaN(tfp) || Number.isNaN(rrb)) {
       toast({ title: "Ошибка валидации", description: "Пожалуйста, введите корректные числовые значения.", variant: "destructive" });
       return;
     }
     
-    if (s <= 0 || t <= 0 || rbp < 0 || rrb < 0) {
-      toast({ title: "Ошибка валидации", description: "Цены и проценты должны быть положительными числами.", variant: "destructive" });
+    if (s <= 0 || rbp < 0 || tmp < 0 || tcm <= 0 || tfp <= 0 || rrb < 0) {
+      toast({ title: "Ошибка валидации", description: "Все значения должны быть положительными.", variant: "destructive" });
       return;
     }
 
     const payload: Record<string, string> = {
       stars_price: String(s),
-      ton_markup_percentage: String(parseNumberOrNaN(tonMarkupPercentage)),
-      ton_price_cache_minutes: String(parseNumberOrNaN(tonCacheMinutes)), 
-      ton_fallback_price: String(parseNumberOrNaN(tonFallbackPrice)),
-      referral_registration_bonus: String(parseNumberOrNaN(referralRegistrationBonus)),
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
       referral_bonus_percentage: String(rbp),
-      referral_registration_bonus: String(rrb), // ← НОВОЕ
+      ton_markup_percentage: String(tmp),
+      ton_price_cache_minutes: String(tcm),
+      ton_fallback_price: String(tfp),
+      referral_registration_bonus: String(rrb),
     };
 
+    console.log("🔥 Frontend prepared payload:", payload);
     updateSettingsMutation.mutate(payload);
   };
 
