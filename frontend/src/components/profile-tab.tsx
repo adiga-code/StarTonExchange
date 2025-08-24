@@ -148,20 +148,18 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
   const shareReferralLink = () => {
     hapticFeedback('medium');
     
-    const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code || '12345678'}`;
-    const shareText = referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON!';
-    
-    // Форматируем так, чтобы после добавления @bot_username получился нужный порядок
-    const fullMessage = `\n${shareText}\n\n${referralLink}`;
-
     if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.switchInlineQuery(fullMessage, ['users', 'groups', 'channels']);
+      // Используем пустой запрос - бот сам отформатирует
+      window.Telegram.WebApp.switchInlineQuery("", ['users', 'groups', 'channels']);
     } else {
+      // Fallback для браузера - обычная ссылка
+      const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code}`;
+      const shareText = referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON!';
+      
       if (navigator.share) {
         navigator.share({
-          title: 'Stars Exchange', 
-          text: shareText,
-          url: referralLink
+          title: 'Stars Exchange',
+          text: `${shareText}\n\n${referralLink}`
         }).catch(() => copyReferralLink());
       } else {
         copyReferralLink();
