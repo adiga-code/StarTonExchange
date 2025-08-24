@@ -34,7 +34,6 @@ type AdminStats = {
 type CurrentSettings = {
   stars_price?: string | number;
   ton_price?: string | number;
-  markup_percentage?: string | number;
   bot_base_url?: string;
   referral_prefix?: string;
   referral_bonus_percentage?: string | number;
@@ -43,7 +42,6 @@ type CurrentSettings = {
 export default function AdminPage(): JSX.Element {
   const [starsPrice, setStarsPrice] = useState<string>("");
   const [tonPrice, setTonPrice] = useState<string>("");
-  const [markupPercentage, setMarkupPercentage] = useState<string>("5");
   const [botBaseUrl, setBotBaseUrl] = useState<string>("");
   const [referralPrefix, setReferralPrefix] = useState<string>("");
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
@@ -83,9 +81,8 @@ export default function AdminPage(): JSX.Element {
 
   useEffect(() => {
     if (!currentSettings) return;
-    setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "2.30"));
+    setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
     setTonPrice(normalizeToStringNumber(currentSettings.ton_price, "420.50"));
-    setMarkupPercentage(normalizeToStringNumber(currentSettings.markup_percentage, "5"));
     setBotBaseUrl(currentSettings.bot_base_url || "");
     setReferralPrefix(currentSettings.referral_prefix || "");
     setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, ""));
@@ -141,21 +138,20 @@ export default function AdminPage(): JSX.Element {
   });
 
   const handleUpdatePrices = () => {
-    if (!starsPrice || !tonPrice || !markupPercentage || !botBaseUrl || !referralPrefix || !referralBonusPercentage) {
+    if (!starsPrice || !tonPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage) {
       toast({ title: "Ошибка валидации", description: "Все поля должны быть заполнены", variant: "destructive" });
       return;
     }
 
     const s = parseNumberOrNaN(starsPrice);
     const t = parseNumberOrNaN(tonPrice);
-    const m = parseNumberOrNaN(markupPercentage);
     const rbp = parseNumberOrNaN(referralBonusPercentage);
 
-    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(m) || Number.isNaN(rbp)) {
+    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(rbp)) {
       toast({ title: "Ошибка валидации", description: "Пожалуйста, введите корректные числовые значения.", variant: "destructive" });
       return;
     }
-    if (s <= 0 || t <= 0 || m < 0 || rbp < 0) {
+    if (s <= 0 || t <= 0 || rbp < 0) {
       toast({ title: "Ошибка валидации", description: "Цены и проценты должны быть положительными числами.", variant: "destructive" });
       return;
     }
@@ -163,7 +159,6 @@ export default function AdminPage(): JSX.Element {
     const payload: Record<string, string> = {
       stars_price: String(s),
       ton_price: String(t),
-      markup_percentage: String(m),
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
       referral_bonus_percentage: String(rbp),
@@ -214,15 +209,11 @@ export default function AdminPage(): JSX.Element {
             <div className="space-y-3">
               <div>
                 <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за звезду (₽)</Label>
-                <Input type="text" value={starsPrice} onChange={(e) => setStarsPrice(e.target.value)} placeholder="2.30" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Input type="text" value={starsPrice} onChange={(e) => setStarsPrice(e.target.value)} placeholder="1.50" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
               <div>
                 <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за TON (₽)</Label>
                 <Input type="text" value={tonPrice} onChange={(e) => setTonPrice(e.target.value)} placeholder="420.50" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
-              </div>
-              <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Наценка (%)</Label>
-                <Input type="text" value={markupPercentage} onChange={(e) => setMarkupPercentage(e.target.value)} placeholder="5" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
             </div>
           </motion.div>
@@ -235,46 +226,64 @@ export default function AdminPage(): JSX.Element {
                 <Input type="text" value={botBaseUrl} onChange={(e) => setBotBaseUrl(e.target.value)} placeholder="https://t.me/bot_name" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Префикс реферальных ссылок</Label>
-                <Input type="text" value={referralPrefix} onChange={(e) => setReferralPrefix(e.target.value)} placeholder="ref" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label className="text-sm text-gray-600 dark:text-gray-400">Префикс рефералки</Label>
+                <Input type="text" value={referralPrefix} onChange={(e) => setReferralPrefix(e.target.value)} placeholder="startapp" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
-              <div className="col-span-2">
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Процент реферального бонуса (%)</Label>
-                <Input type="text" value={referralBonusPercentage} onChange={(e) => setReferralBonusPercentage(e.target.value)} placeholder="10" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+              <div>
+                <Label className="text-sm text-gray-600 dark:text-gray-400">Процент бонуса (%)</Label>
+                <Input type="text" value={referralBonusPercentage} onChange={(e) => setReferralBonusPercentage(e.target.value)} placeholder="5" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
               </div>
-            </div>
-          </motion.div>
-
-          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg md:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <h3 className="font-semibold mb-3 flex items-center"><History className="w-4 h-4 text-[#4E7FFF] mr-2" />Последние транзакции</h3>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {adminStats?.recentTransactions?.length ? (
-                adminStats.recentTransactions.map((tx) => (
-                  <div key={tx.id} className="flex items-center justify-between py-2 border-b border-gray-200 dark:border-white/10 last:border-b-0">
-                    <div>
-                      <p className="font-medium">{tx.username}</p>
-                      <p className="text-gray-600 dark:text-gray-400 text-sm">{tx.description}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`font-medium ${tx.status === "completed" ? "text-green-500" : tx.status === "failed" ? "text-red-500" : "text-yellow-500"}`}>
-                        {tx.status === "completed" ? "Успешно" : tx.status === "failed" ? "Ошибка" : "В обработке"}
-                      </p>
-                      <p className="text-gray-600 dark:text-gray-400 text-xs">
-                        {tx.createdAt ? new Date(tx.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : ""}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-gray-500 dark:text-gray-400 text-center py-4">Транзакций пока нет</p>
-              )}
             </div>
           </motion.div>
         </div>
 
-        <Button onClick={handleUpdatePrices} disabled={updateSettingsMutation.isLoading} className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white fixed bottom-4 left-4 right-4">
-          {updateSettingsMutation.isLoading ? "Обновление..." : "Обновить все настройки"}
-        </Button>
+        <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+          <Button
+            onClick={handleUpdatePrices}
+            disabled={updateSettingsMutation.isPending}
+            className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white font-semibold py-3"
+            size="lg"
+          >
+            {updateSettingsMutation.isPending ? (
+              <>
+                <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
+                Сохраняем...
+              </>
+            ) : (
+              "Сохранить настройки"
+            )}
+          </Button>
+        </motion.div>
+
+        {/* Recent Transactions */}
+        {adminStats?.recentTransactions && adminStats.recentTransactions.length > 0 && (
+          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+            <h3 className="font-semibold mb-3 flex items-center">
+              <History className="w-4 h-4 text-purple-500 mr-2" />
+              Последние транзакции
+            </h3>
+            <div className="space-y-2">
+              {adminStats.recentTransactions.slice(0, 5).map((transaction) => (
+                <div key={transaction.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg">
+                  <div className="flex-1">
+                    <p className="font-medium text-sm">{transaction.username || 'Неизвестный пользователь'}</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">{transaction.description || 'Нет описания'}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className={`inline-block px-2 py-1 text-xs rounded-full ${
+                      transaction.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                      transaction.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                      'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                    }`}>
+                      {transaction.status === 'completed' ? 'Успешно' : 
+                       transaction.status === 'pending' ? 'В обработке' : 'Ошибка'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </main>
     </div>
   );

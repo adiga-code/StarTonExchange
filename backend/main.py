@@ -341,19 +341,32 @@ async def calculate_purchase(
             "ton": float(await storage.get_cached_setting("ton_price")),
         }
         
-        markup = float(await storage.get_cached_setting("markup_percentage")) / 100
+        # Рассчитываем цену без наценки
+        total_price = purchase_data.amount * prices[purchase_data.currency]
         
-        base_price = purchase_data.amount * prices[purchase_data.currency]
-        markup_amount = base_price * markup
-        total_price = base_price + markup_amount
-        
-        return PurchaseCalculateResponse(
-            base_price=f"{base_price:.2f}",
-            markup_amount=f"{markup_amount:.2f}",
-            total_price=f"{total_price:.2f}",
-            currency=purchase_data.currency,
-            amount=purchase_data.amount
-        )
+        # Для звезд добавляем информацию об экономии
+        if purchase_data.currency == "stars":
+            OFFICIAL_STARS_PRICE = 1.8  # Константа официальной цены
+            official_total = purchase_data.amount * OFFICIAL_STARS_PRICE
+            savings = official_total - total_price
+            savings_percentage = (savings / official_total) * 100 if official_total > 0 else 0
+            
+            return PurchaseCalculateResponse(
+                base_price=f"{total_price:.2f}",
+                currency=purchase_data.currency,
+                amount=purchase_data.amount,
+                official_price=f"{official_total:.2f}",
+                savings_amount=f"{savings:.2f}",
+                savings_percentage=f"{savings_percentage:.1f}"
+            )
+        else:
+            # Для TON только базовая цена
+            return PurchaseCalculateResponse(
+                base_price=f"{total_price:.2f}",
+                currency=purchase_data.currency,
+                amount=purchase_data.amount
+            )
+            
     except Exception as e:
         logger.error(f"Error calculating price: {e}")
         raise HTTPException(status_code=500, detail="Failed to calculate price")
@@ -369,9 +382,33 @@ async def make_purchase(
         if purchase_data.currency not in ['stars', 'ton']:
             raise HTTPException(status_code=400, detail="Invalid currency. Must be 'stars' or 'ton'")
         
+        # Validate minimum amounts
+        min_amounts = {"stars": 50, "ton": 0.1}
+        if purchase_data.amount < min_amounts[purchase_data.currency]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Minimum amount for {purchase_data.currency} is {min_amounts[purchase_data.currency]}"
+            )
+        
         robokassa = get_robokassa()
         if not robokassa:
             raise HTTPException(status_code=500, detail="Payment system not configured")
+        
+        # Get current prices without markup
+        prices = {
+            "stars": float(await storage.get_cached_setting("stars_price")),
+            "ton": float(await storage.get_cached_setting("ton_price")),
+        }
+        
+        # Calculate total price without markup
+        calculated_total = purchase_data.amount * prices[purchase_data.currency]
+        
+        # Verify that the sent rub_amount matches our calculation
+        if abs(calculated_total - purchase_data.rub_amount) > 0.01:  # Allow 1 kopeck difference
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Price mismatch. Expected: {calculated_total:.2f}, got: {purchase_data.rub_amount:.2f}"
+            )
         
         # Generate unique invoice ID
         import uuid
@@ -380,14 +417,15 @@ async def make_purchase(
         # Create transaction record
         transaction_data = TransactionCreate(
             user_id=current_user.id,
-            type="purchase",  # Унифицированный тип для всех покупок
+            type="purchase",
             currency=purchase_data.currency,
             amount=Decimal(str(purchase_data.amount)),
             rub_amount=Decimal(str(purchase_data.rub_amount)),
             status="pending",
-            description=f"Purchase {purchase_data.amount} {purchase_data.currency}",
+            description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
             payment_system="robokassa",
-            invoice_id=invoice_id
+            invoice_id=invoice_id,
+            recipient_username=purchase_data.username
         )
         
         transaction = await storage.create_transaction(transaction_data)
@@ -396,14 +434,14 @@ async def make_purchase(
         payment_url = robokassa.create_payment_url(
             invoice_id=invoice_id,
             amount=Decimal(str(purchase_data.rub_amount)),
-            description=f"Purchase {purchase_data.amount} {purchase_data.currency}",
+            description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
             user_email=f"{current_user.telegram_id}@telegram.user"
         )
         
         # Update transaction with payment URL
         await storage.update_transaction(transaction.id, {"payment_url": payment_url})
         
-        logger.info(f"Created payment for user {current_user.telegram_id}: {purchase_data.rub_amount} RUB")
+        logger.info(f"Created payment for user {current_user.telegram_id}: {purchase_data.rub_amount} RUB for {purchase_data.amount} {purchase_data.currency}")
         
         return PaymentCreateResponse(
             transaction_id=transaction.id,
@@ -795,8 +833,8 @@ async def update_admin_settings(
             await storage.update_setting("stars_price", settings.stars_price)
         if settings.ton_price:
             await storage.update_setting("ton_price", settings.ton_price)
-        if settings.markup_percentage:
-            await storage.update_setting("markup_percentage", settings.markup_percentage)
+        # if settings.markup_percentage:
+        #     await storage.update_setting("markup_percentage", settings.markup_percentage)
         if settings.bot_base_url:
             await storage.update_setting("bot_base_url", settings.bot_base_url)
         if settings.referral_prefix:
@@ -1044,7 +1082,7 @@ async def get_admin_settings(storage: Storage = Depends(get_storage)):
     return {
         "stars_price": await storage.get_cached_setting("stars_price"),
         "ton_price": await storage.get_cached_setting("ton_price"),
-        "markup_percentage": await storage.get_cached_setting("markup_percentage"),
+        # "markup_percentage": await storage.get_cached_setting("markup_percentage"),
         "bot_base_url": await storage.get_cached_setting("bot_base_url"),
         "referral_prefix": await storage.get_cached_setting("referral_prefix"),
         "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage")

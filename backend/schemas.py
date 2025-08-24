@@ -190,11 +190,13 @@ class PurchaseCalculate(BaseModel):
     amount: float = Field(..., gt=0)
 
 class PurchaseCalculateResponse(BaseModel):
-    base_price: str
-    markup_amount: str
-    total_price: str
+    base_price: str  # Цена по вашему курсу (итоговая цена)
     currency: str
     amount: float
+    # Только для звезд:
+    official_price: Optional[str] = None  # Официальная цена (1.8 * количество)
+    savings_amount: Optional[str] = None  # Экономия в рублях
+    savings_percentage: Optional[str] = None  # Экономия в процентах
 
 class PurchaseRequest(BaseModel):
     currency: str
@@ -223,7 +225,7 @@ class AdminStats(BaseModel):
 class AdminSettingsUpdate(BaseModel):
     stars_price: Optional[str] = None
     ton_price: Optional[str] = None
-    markup_percentage: Optional[str] = None
+    #markup_percentage: Optional[str] = None
     bot_base_url: Optional[str] = None
     referral_prefix: Optional[str] = None
     referral_bonus_percentage: Optional[str] = None

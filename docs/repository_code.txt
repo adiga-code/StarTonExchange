@@ -878,15 +878,126 @@ async def get_current_user_info(
 
 @app.put("/api/users/me", response_model=UserResponse)
 async def update_current_user(
-    updates: UserUpdate,
+    user_data: UserUpdate,
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
-    update_dict = {k: v for k, v in updates.dict().items() if v is not None}
-    updated_user = await storage.update_user(current_user.id, update_dict)
-    return updated_user
+    """Обновить данные текущего пользователя"""
+    try:
+        # Создаем словарь только с переданными данными (не None)
+        update_data = {}
+        if user_data.username is not None:
+            update_data["username"] = user_data.username
+        if user_data.first_name is not None:
+            update_data["first_name"] = user_data.first_name
+        if user_data.last_name is not None:
+            update_data["last_name"] = user_data.last_name  
+        if user_data.notifications_enabled is not None:
+            update_data["notifications_enabled"] = user_data.notifications_enabled
+            
+        if not update_data:
+            # Если нет данных для обновления, просто возвращаем текущего пользователя
+            return current_user
+            
+        # Обновляем пользователя
+        updated_user = await storage.update_user(current_user.id, update_data)
+        
+        if not updated_user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        logger.info(f"User {current_user.telegram_id} updated: {update_data}")
+        return updated_user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update user")
 
-
+@app.get("/api/transactions/history", response_model=TransactionHistoryResponse)
+async def get_user_transactions_history(
+    current_user: User = Depends(get_authenticated_user),
+    storage: Storage = Depends(get_storage)
+):
+    """Получить историю транзакций пользователя"""
+    try:
+        transactions = await storage.get_transactions_by_user_id(current_user.id)
+        
+        # Фильтруем только покупки (тип "purchase")
+        purchase_transactions = [t for t in transactions if t.type == "purchase"]
+        
+        # Преобразуем в нужный формат для фронтенда
+        transaction_history = []
+        for transaction in purchase_transactions:
+            # Определяем тип транзакции и иконку
+            transaction_type = "purchase"
+            icon_type = "star" if transaction.currency == "stars" else "ton"
+            
+            # Форматируем описание
+            if transaction.type == "purchase":
+                if transaction.currency == "stars":
+                    description = f"Покупка {int(transaction.amount)} звезд"
+                elif transaction.currency == "ton":
+                    description = f"Покупка {float(transaction.amount)} TON"
+                else:
+                    description = transaction.description or f"Покупка {transaction.currency}"
+            elif transaction.type == "task_reward":
+                description = transaction.description or f"Награда за задание"
+                icon_type = "star"
+            else:
+                description = transaction.description or f"Транзакция {transaction.type}"
+            
+            # Определяем статус на русском
+            status_map = {
+                "completed": "Успешно",
+                "pending": "В обработке",
+                "failed": "Ошибка",
+                "cancelled": "Отменено"
+            }
+            status_text = status_map.get(transaction.status, transaction.status)
+            
+            # Определяем цвет статуса
+            status_color = {
+                "completed": "green",
+                "pending": "yellow", 
+                "failed": "red",
+                "cancelled": "gray"
+            }.get(transaction.status, "gray")
+            
+            # Форматирование даты с русскими месяцами
+            month_names = {
+                1: "янв", 2: "фев", 3: "мар", 4: "апр", 5: "май", 6: "июн",
+                7: "июл", 8: "авг", 9: "сен", 10: "окт", 11: "ноя", 12: "дек"
+            }
+            created_date = transaction.created_at
+            formatted_date = f"{created_date.day} {month_names[created_date.month]} {created_date.year}, {created_date.strftime('%H:%M')}"
+            
+            transaction_history.append({
+                "id": transaction.id,
+                "description": description,
+                "amount": float(transaction.amount),
+                "currency": transaction.currency,
+                "rub_amount": float(transaction.rub_amount) if transaction.rub_amount else None,
+                "status": transaction.status,
+                "status_text": status_text,
+                "status_color": status_color,
+                "icon_type": icon_type,
+                "created_at": transaction.created_at.isoformat(),
+                "created_at_formatted": formatted_date
+            })
+        
+        # Сортируем по дате создания (новые сверху)
+        transaction_history.sort(key=lambda x: x["created_at"], reverse=True)
+        
+        return {
+            "success": True, 
+            "transactions": transaction_history,
+            "count": len(transaction_history)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting transactions history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get transactions history")
 
 @app.get("/api/getPhoto")
 async def get_photo(username: str):
@@ -1021,7 +1132,7 @@ async def make_purchase(
         # Create transaction record
         transaction_data = TransactionCreate(
             user_id=current_user.id,
-            type="buy_stars" if purchase_data.currency == "stars" else "buy_ton",
+            type="purchase",  # Унифицированный тип для всех покупок
             currency=purchase_data.currency,
             amount=Decimal(str(purchase_data.amount)),
             rub_amount=Decimal(str(purchase_data.rub_amount)),
@@ -1526,7 +1637,66 @@ async def create_task_admin(
         logger.error(f"Error creating task: {e}")
         raise HTTPException(status_code=500, detail="Failed to create task")
 
-
+@app.get("/api/tasks/completed")
+async def get_user_completed_tasks(
+    current_user: User = Depends(get_authenticated_user),
+    storage: Storage = Depends(get_storage)
+):
+    """Получить историю выполненных заданий пользователя"""
+    try:
+        # Получаем все выполненные задания пользователя
+        completed_user_tasks = await storage.get_completed_user_tasks(current_user.id)
+        
+        # Преобразуем в нужный формат для фронтенда
+        completed_tasks_history = []
+        for user_task in completed_user_tasks:
+            task = await storage.get_task(user_task.task_id)
+            if not task:
+                continue
+                
+            # Определяем тип задания на русском
+            task_type_map = {
+                "daily": "Ежедневное",
+                "social": "Социальное", 
+                "purchase": "Покупка",
+                "referral": "Реферальное",
+                "special": "Специальное"
+            }
+            task_type_text = task_type_map.get(task.type, task.type.capitalize())
+            
+            # Форматирование даты с русскими месяцами
+            month_names = {
+                1: "янв", 2: "фев", 3: "мар", 4: "апр", 5: "май", 6: "июн",
+                7: "июл", 8: "авг", 9: "сен", 10: "окт", 11: "ноя", 12: "дек"
+            }
+            completed_date = user_task.completed_at
+            formatted_date = f"{completed_date.day} {month_names[completed_date.month]} {completed_date.year}, {completed_date.strftime('%H:%M')}"
+            
+            completed_tasks_history.append({
+                "id": user_task.id,
+                "task_id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "reward": task.reward,
+                "task_type": task.type,
+                "task_type_text": task_type_text,
+                "completed_at": user_task.completed_at.isoformat(),
+                "completed_at_formatted": formatted_date
+            })
+        
+        # Сортируем по дате выполнения (новые сверху)
+        completed_tasks_history.sort(key=lambda x: x["completed_at"], reverse=True)
+        
+        return {
+            "success": True, 
+            "completed_tasks": completed_tasks_history,
+            "count": len(completed_tasks_history)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting completed tasks history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get completed tasks history")
+    
 @app.get("/api/admin/tasks/list")
 async def list_tasks_admin(
     token: str,
@@ -2035,7 +2205,7 @@ FILE: backend\schemas.py
 ================================================================================
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 
@@ -2099,6 +2269,53 @@ class TransactionResponse(BaseModel):
     invoice_id: Optional[str]
     created_at: datetime
     paid_at: Optional[datetime]
+    
+    class Config:
+        from_attributes = True
+
+class TransactionHistoryItem(BaseModel):
+    id: str
+    description: str
+    amount: float
+    currency: str
+    rub_amount: Optional[float] = None
+    status: str
+    status_text: str
+    status_color: str
+    icon_type: str
+    created_at: str
+    created_at_formatted: str
+    
+    class Config:
+        from_attributes = True
+
+class TransactionHistoryResponse(BaseModel):
+    success: bool
+    transactions: List[TransactionHistoryItem]
+    count: int
+    
+    class Config:
+        from_attributes = True
+
+# Completed Tasks History schemas
+class CompletedTaskHistoryItem(BaseModel):
+    id: str
+    task_id: str
+    title: str
+    description: str
+    reward: int
+    task_type: str
+    task_type_text: str
+    completed_at: str
+    completed_at_formatted: str
+    
+    class Config:
+        from_attributes = True
+
+class CompletedTasksHistoryResponse(BaseModel):
+    success: bool
+    completed_tasks: List[CompletedTaskHistoryItem]
+    count: int
     
     class Config:
         from_attributes = True
@@ -2483,6 +2700,20 @@ class Storage:
         )
         await self.db.commit()
         return await self.get_user_task(user_id, task_id)
+
+    async def get_completed_user_tasks(self, user_id: str) -> List[UserTask]:
+        """Получить все выполненные задания пользователя"""
+        result = await self.db.execute(
+            select(UserTask)
+            .where(
+                and_(
+                    UserTask.user_id == user_id,
+                    UserTask.completed == True
+                )
+            )
+            .order_by(UserTask.completed_at.desc())
+        )
+        return result.scalars().all()
 
     # Setting methods
     async def get_setting(self, key: str) -> Optional[Setting]:
@@ -3356,14 +3587,19 @@ FILE: frontend\index.html
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  
+  <!-- Google Fonts - Manrope с поддержкой кириллицы -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap&subset=latin,cyrillic" rel="stylesheet">
+  
+  <title>Stars Exchange</title>
 </head>
 
 <body>
   <div id="root"></div>
   <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
   <script type="module" src="/src/main.tsx"></script>
-  <!-- This is a replit script which adds a banner on the top of the page when opened in development mode outside the replit environment -->
-  <script type="text/javascript" src="https://replit.com/public/js/replit-dev-banner.js"></script>
 </body>
 
 </html>
@@ -3587,6 +3823,11 @@ export default {
   content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
   theme: {
     extend: {
+      // Добавляем Manrope как основной шрифт
+      fontFamily: {
+        sans: ['Manrope', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        manrope: ['Manrope', 'sans-serif'],
+      },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
@@ -3668,9 +3909,8 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
+  plugins: [require("tailwindcss-animate")],
 } satisfies Config;
-
 
 ================================================================================
 FILE: frontend\tsconfig.json
@@ -3952,91 +4192,118 @@ FILE: frontend\src\index.css
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: hsl(0, 0%, 100%);
-  --foreground: hsl(20, 14.3%, 4.1%);
-  --muted: hsl(60, 4.8%, 95.9%);
-  --muted-foreground: hsl(25, 5.3%, 44.7%);
-  --popover: hsl(0, 0%, 100%);
-  --popover-foreground: hsl(20, 14.3%, 4.1%);
-  --card: hsl(0, 0%, 100%);
-  --card-foreground: hsl(20, 14.3%, 4.1%);
-  --border: hsl(20, 5.9%, 90%);
-  --input: hsl(20, 5.9%, 90%);
-  --primary: hsl(207, 90%, 54%);
-  --primary-foreground: hsl(211, 100%, 99%);
-  --secondary: hsl(60, 4.8%, 95.9%);
-  --secondary-foreground: hsl(24, 9.8%, 10%);
-  --accent: hsl(60, 4.8%, 95.9%);
-  --accent-foreground: hsl(24, 9.8%, 10%);
-  --destructive: hsl(0, 84.2%, 60.2%);
-  --destructive-foreground: hsl(60, 9.1%, 97.8%);
-  --ring: hsl(20, 14.3%, 4.1%);
-  --radius: 0.5rem;
-
-  /* Custom app-specific colors */
-  --app-bg-light: hsl(0, 0%, 100%);
-  --app-bg-dark: hsl(225, 6%, 6%);
-  --app-card-dark: hsl(240, 4%, 11%);
-  --app-accent-blue: hsl(218, 100%, 65%);
-  --app-accent-blue-hover: hsl(218, 100%, 60%);
-  --app-success: hsl(158, 100%, 42%);
-  --app-warning: hsl(41, 100%, 50%);
-  --app-error: hsl(348, 95%, 61%);
-}
-
-.dark {
-  --background: hsl(225, 6%, 6%);
-  --foreground: hsl(0, 0%, 100%);
-  --muted: hsl(240, 4%, 11%);
-  --muted-foreground: hsl(0, 0%, 69%);
-  --popover: hsl(240, 4%, 11%);
-  --popover-foreground: hsl(0, 0%, 100%);
-  --card: hsl(240, 4%, 11%);
-  --card-foreground: hsl(0, 0%, 100%);
-  --border: hsl(240, 4%, 16%);
-  --input: hsl(240, 4%, 16%);
-  --primary: hsl(218, 100%, 65%);
-  --primary-foreground: hsl(211, 100%, 99%);
-  --secondary: hsl(240, 4%, 11%);
-  --secondary-foreground: hsl(0, 0%, 100%);
-  --accent: hsl(240, 4%, 11%);
-  --accent-foreground: hsl(0, 0%, 100%);
-  --destructive: hsl(348, 95%, 61%);
-  --destructive-foreground: hsl(0, 0%, 100%);
-  --ring: hsl(240, 4.9%, 83.9%);
-  --radius: 0.5rem;
-}
-
 @layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+    --radius: 0.5rem;
+
+    /* App-specific custom properties */
+    --app-bg-dark: hsl(240, 4%, 6%);
+    --app-card-dark: hsl(240, 4%, 11%);
+    --app-accent-blue: hsl(221, 83%, 53%);
+    --app-success: hsl(142, 76%, 36%);
+    --app-warning: hsl(38, 92%, 50%);
+    --app-error: hsl(0, 84%, 60%);
+    
+    /* Sidebar colors */
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+    
+    /* Dark theme sidebar colors */
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 94.1%;
+    --sidebar-primary-foreground: 240 5.9% 10%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+  
+  /* Применяем Manrope ко всем элементам */
   * {
     @apply border-border;
+    font-family: 'Manrope', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
-
+  
   body {
-    @apply font-sans antialiased bg-background text-foreground;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    @apply bg-background text-foreground;
+    font-family: 'Manrope', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
   }
 
-  html.dark body {
-    background-color: var(--app-bg-dark);
-    color: var(--foreground);
-  }
-}
-
-@layer components {
-  .glow-button {
-    box-shadow: 0 0 20px rgba(78, 127, 255, 0.3);
-    transition: all 0.15s ease;
+  /* Улучшенная типографика для Manrope */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Manrope', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.025em;
   }
   
-  .glow-button:hover {
-    transform: scale(1.02);
-    box-shadow: 0 0 30px rgba(78, 127, 255, 0.5);
+  .text-balance {
+    text-wrap: balance;
   }
   
-  .card-glow {
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  /* Enhanced focus styles */
+  .dark :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring)), 0 0 0 1px rgba(255, 255, 255, 0.05);
   }
   
   .skeleton {
@@ -4125,6 +4392,35 @@ FILE: frontend\src\index.css
   .text-app-error {
     color: var(--app-error);
   }
+  
+  /* Дополнительные font-weight утилиты для Manrope */
+  .font-extralight {
+    font-weight: 200;
+  }
+  
+  .font-light {
+    font-weight: 300;
+  }
+  
+  .font-normal {
+    font-weight: 400;
+  }
+  
+  .font-medium {
+    font-weight: 500;
+  }
+  
+  .font-semibold {
+    font-weight: 600;
+  }
+  
+  .font-bold {
+    font-weight: 700;
+  }
+  
+  .font-extrabold {
+    font-weight: 800;
+  }
 }
 
 /* Custom scrollbar for dark theme */
@@ -4144,7 +4440,6 @@ FILE: frontend\src\index.css
 .dark ::-webkit-scrollbar-thumb:hover {
   background: hsl(240, 4%, 35%);
 }
-
 
 ================================================================================
 FILE: frontend\src\main.tsx
@@ -4524,6 +4819,8 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Star } from "@/components/ui/custom-icons";
+import ButtonWithdrawal from "./ui/button-withdrawal"; // Обновленный импорт
+import { useToast } from "@/hooks/use-toast";
 import type { SnakeCaseUser } from "@shared/schema";
 
 interface BalanceCardProps {
@@ -4531,6 +4828,7 @@ interface BalanceCardProps {
 }
 
 export default function BalanceCard({ user }: BalanceCardProps) {
+  const { toast } = useToast();
   const starsBalance = user?.stars_balance ?? 0;
 
   // ✅ Получаем актуальные цены из API
@@ -4540,7 +4838,6 @@ export default function BalanceCard({ user }: BalanceCardProps) {
       const response = await apiRequest('GET', '/api/admin/settings/current');
       return response.json();
     },
-    //staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnMount: true,
     refetchInterval: 10000, // Каждые 10 секунд
@@ -4568,9 +4865,8 @@ export default function BalanceCard({ user }: BalanceCardProps) {
         </motion.h2>
         
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-center">
             <div className="flex items-center">
-              <Star className="w-6 h-6 text-yellow-300 mr-3" />
               <div>
                 <motion.span
                   className="text-3xl font-bold"
@@ -4582,29 +4878,40 @@ export default function BalanceCard({ user }: BalanceCardProps) {
                   {starsBalance.toLocaleString()}
                 </motion.span>
               </div>
-              <p className="text-gray-200 text-sm ml-2">Telegram Stars</p>
+              <Star className="w-6 h-6 text-yellow-300 mr-3" />
+              {/* <p className="text-gray-200 text-sm ml-2">Telegram Stars</p> */}
             </div>
           </div>
           
           <motion.div
-            className="mt-4 pt-4 border-t border-white/10"
+            className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
-            <p className="text-gray-200 text-xs">Стоимость звезд</p>
-            <motion.p
-              className="text-lg font-semibold"
-              key={totalRubValue}
-              initial={{ scale: 1 }}
-              animate={{ scale: [1, 1.05, 1] }}
-              transition={{ duration: 0.3 }}
-            >
-              ₽{totalRubValue.toLocaleString()}
-            </motion.p>
-            <div className="text-xs text-gray-200 mt-1">
-              {starsBalance.toLocaleString()} × ₽{starsPrice} за звезду
+            <div className="text-center">
+              <p className="text-gray-200 text-xs">Стоимость звезд</p>
+              <motion.p
+                className="text-lg font-semibold"
+                key={totalRubValue}
+                initial={{ scale: 1 }}
+                animate={{ scale: [1, 1.05, 1] }}
+                transition={{ duration: 0.3 }}
+              >
+                ₽{totalRubValue.toLocaleString()}
+              </motion.p>
+              {/* <div className="text-xs text-gray-200 mt-1">
+                {starsBalance.toLocaleString()} × ₽{starsPrice} за звезду
+              </div> */}
             </div>
+            <ButtonWithdrawal
+              onClick={() => {
+                toast({
+                  title: "Вывод",
+                  description: "Функция вывода звезд в разработке",
+                });
+              }}
+            />
           </motion.div>
         </div>
       </div>
@@ -5254,28 +5561,62 @@ export function PaymentMethodModal({ isOpen, onClose, onSelectSBP, isLoading = f
 FILE: frontend\src\components\profile-tab.tsx
 ================================================================================
 
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useTelegram } from "@/hooks/use-telegram";
 import { useUserAvatar } from "@/hooks/use-user-avatar";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Copy, Share, Star, Bell, Palette, Plus, Minus, Wallet, CreditCard, History, Receipt } from "lucide-react";
+import { 
+  Users, Copy, Share, Star, Bell, Palette, History, Receipt, ShoppingCart, 
+  ChevronDown, ChevronUp, Target, Gift
+} from "@/components/ui/custom-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import type { SnakeCaseUser, User } from "@shared/schema";
 
-
 interface ProfileTabProps {
   user?: SnakeCaseUser;
+  onTabChange?: (tab: 'buy' | 'earn' | 'sell' | 'profile') => void;
 }
 
-export default function ProfileTab({ user }: ProfileTabProps) {
+interface TransactionHistoryItem {
+  id: string;
+  description: string;
+  amount: number;
+  currency: string;
+  rub_amount?: number;
+  status: string;
+  status_text: string;
+  status_color: string;
+  icon_type: string;
+  created_at: string;
+  created_at_formatted: string;
+}
+
+interface CompletedTaskHistoryItem {
+  id: string;
+  task_id: string;
+  title: string;
+  description: string;
+  reward: number;
+  task_type: string;
+  task_type_text: string;
+  completed_at: string;
+  completed_at_formatted: string;
+}
+
+export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
+  const [isPurchaseHistoryExpanded, setIsPurchaseHistoryExpanded] = useState(false);
+  const [isTasksHistoryExpanded, setIsTasksHistoryExpanded] = useState(false);
+
   const { toast } = useToast();
   const { hapticFeedback, shareApp } = useTelegram();
   const userAvatar = useUserAvatar(user?.username);
+  const queryClient = useQueryClient();
 
   const { data: referralStats } = useQuery({
     queryKey: ['/api/referrals/stats'],
@@ -5285,13 +5626,6 @@ export default function ProfileTab({ user }: ProfileTabProps) {
     },
   });
 
-  const getUserInitials = () => {
-    if (!user) return 'JD';
-    const first = user.first_name?.[0] || '';
-    const last = user.last_name?.[0] || '';
-    return (first + last).toUpperCase() || user.username?.[0]?.toUpperCase() || 'U';
-  };
-
   const { data: referralConfig } = useQuery({
     queryKey: ['/api/config/referral'],
     queryFn: async () => {
@@ -5299,6 +5633,61 @@ export default function ProfileTab({ user }: ProfileTabProps) {
       return response.json();
     },
   });
+
+  // Запрос истории транзакций (только покупки)
+  const { data: transactionsData, isLoading: transactionsLoading, error: transactionsError } = useQuery({
+    queryKey: ['/api/transactions/history'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/transactions/history');
+      return response.json();
+    },
+    refetchOnWindowFocus: false,
+    refetchOnMount: true,
+  });
+
+  // Запрос выполненных заданий
+  const { data: completedTasksData, isLoading: tasksLoading, error: tasksError } = useQuery({
+    queryKey: ['/api/tasks/completed'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/tasks/completed');
+      return response.json();
+    },
+    refetchOnWindowFocus: false,
+    refetchOnMount: true,
+  });
+
+  // Mutation для обновления настроек пользователя
+  const updateUserMutation = useMutation({
+    mutationFn: async (updateData: { notifications_enabled?: boolean }) => {
+      const response = await apiRequest('PUT', '/api/users/me', updateData);
+      return response.json();
+    },
+    onSuccess: (updatedUser) => {
+      // Обновляем кэш пользователя
+      queryClient.setQueryData(['/api/users/me'], updatedUser);
+      hapticFeedback('success');
+      toast({
+        title: "Настройки обновлены",
+        description: "Изменения успешно сохранены",
+      });
+    },
+    onError: (error) => {
+      console.error('Error updating user:', error);
+      hapticFeedback('error');
+      toast({
+        title: "Ошибка",
+        description: "Не удалось обновить настройки",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const getUserInitials = () => {
+    if (!user) return 'JD';
+    const first = user.first_name?.[0] || '';
+    const last = user.last_name?.[0] || '';
+    return (first + last).toUpperCase() || user.username?.[0]?.toUpperCase() || 'U';
+  };
 
   const copyReferralLink = async () => {
     const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code || '12345678'}`;
@@ -5321,9 +5710,109 @@ export default function ProfileTab({ user }: ProfileTabProps) {
 
   const shareReferralLink = () => {
     hapticFeedback('medium');
-    shareApp(referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON! 🚀');
+    shareApp(referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON!');
   };
-  console.log("user", user)
+
+  const handleGoToBuy = () => {
+    if (onTabChange) {
+      hapticFeedback('light');
+      onTabChange('buy');
+    }
+  };
+
+  const handleGoToTasks = () => {
+    if (onTabChange) {
+      hapticFeedback('light');
+      onTabChange('earn');
+    }
+  };
+
+  const handleNotificationsToggle = (checked: boolean) => {
+    hapticFeedback('light');
+    updateUserMutation.mutate({ notifications_enabled: checked });
+  };
+
+  const getTransactionIcon = (iconType: string) => {
+    switch (iconType) {
+      case 'star':
+        return <Star className="w-5 h-5 text-yellow-500" />;
+      case 'ton':
+        return <Receipt className="w-5 h-5 text-[#4E7FFF]" />;
+      default:
+        return <Receipt className="w-5 h-5 text-gray-500" />;
+    }
+  };
+
+  const getStatusColor = (statusColor: string) => {
+    switch (statusColor) {
+      case 'green':
+        return 'text-green-500';
+      case 'yellow':
+        return 'text-yellow-500';
+      case 'red':
+        return 'text-red-500';
+      case 'gray':
+        return 'text-gray-500';
+      default:
+        return 'text-gray-500';
+    }
+  };
+
+  const renderTransactionItem = (transaction: TransactionHistoryItem) => (
+    <div
+      key={transaction.id}
+      className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10"
+    >
+      <div className="flex items-center space-x-3">
+        <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
+          {getTransactionIcon(transaction.icon_type)}
+        </div>
+        <div>
+          <p className="font-medium">{transaction.description}</p>
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
+            {transaction.created_at_formatted}
+          </p>
+        </div>
+      </div>
+      <div className="text-right">
+        <p className={`font-semibold ${getStatusColor(transaction.status_color)}`}>
+          {transaction.status_text}
+        </p>
+        {transaction.rub_amount && (
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
+            ₽{transaction.rub_amount.toFixed(2)}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderCompletedTaskItem = (task: CompletedTaskHistoryItem) => (
+    <div
+      key={task.id}
+      className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10"
+    >
+      <div className="flex items-center space-x-3">
+        <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
+          <Target className="w-5 h-5 text-blue-500" />
+        </div>
+        <div>
+          <p className="font-medium">{task.title}</p>
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
+            {task.task_type_text} • {task.completed_at_formatted}
+          </p>
+        </div>
+      </div>
+      <div className="text-right">
+        <p className="font-semibold text-green-500">+{task.reward}</p>
+        <p className="text-gray-600 dark:text-gray-400 text-sm flex items-center">
+          <Star className="w-3 h-3 mr-1" />
+          звезд
+        </p>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       {/* User Info */}
@@ -5338,20 +5827,20 @@ export default function ProfileTab({ user }: ProfileTabProps) {
             <img 
               src={userAvatar.photo_url} 
               alt="Avatar" 
-              className="w-16 h-16 rounded-full object-cover"
+              className="w-16 h-16 rounded-full"
             />
           ) : (
             <motion.div
               className="w-16 h-16 bg-gradient-to-br from-[#4E7FFF] to-purple-500 rounded-full flex items-center justify-center"
               whileHover={{ scale: 1.05 }}
             >
-              <span className="text-xl font-bold text-white">{getUserInitials()}</span>
+              <span className="text-lg font-bold text-white">{getUserInitials()}</span>
             </motion.div>
           )}
           <div>
-            <h3 className="text-xl font-bold">
+            <h2 className="text-xl font-bold">
               {user?.first_name} {user?.last_name}
-            </h3>
+            </h2>
             <p className="text-gray-600 dark:text-gray-400">
               {user?.username ? `@${user.username}` : 'Пользователь'}
             </p>
@@ -5409,15 +5898,15 @@ export default function ProfileTab({ user }: ProfileTabProps) {
             </Label>
             <div className="flex mt-2">
               <Input
-                value={referralConfig ? `${referralConfig.bot_base_url}?start=${referralConfig.referral_prefix}${user?.referral_code || '12345678'}` : 'Загрузка...'}
+                value={referralConfig ? `${referralConfig.bot_base_url}?start=${referralConfig.referral_prefix}${user?.referral_code || '12345678'}` : ''}
                 readOnly
-                className="flex-1 bg-gray-50 dark:bg-[#0E0E10] border-gray-200 dark:border-white/20 text-sm text-gray-600 dark:text-gray-400"
+                className="flex-1 bg-gray-50 dark:bg-[#0E0E10]"
               />
               <Button
-                onClick={copyReferralLink}
                 variant="outline"
-                size="icon"
-                className="ml-2 border-gray-200 dark:border-white/20 hover:bg-[#4E7FFF] hover:text-white"
+                size="sm"
+                onClick={copyReferralLink}
+                className="ml-2"
               >
                 <Copy className="w-4 h-4" />
               </Button>
@@ -5426,34 +5915,15 @@ export default function ProfileTab({ user }: ProfileTabProps) {
 
           <Button
             onClick={shareReferralLink}
-            className="w-full bg-gradient-to-r from-[#4E7FFF] to-purple-500 text-white font-semibold py-3 rounded-lg glow-button"
+            className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white"
           >
             <Share className="w-4 h-4 mr-2" />
             Поделиться ссылкой
           </Button>
         </div>
-
-        {/* Referral Stats */}
-        <div className="mt-4 space-y-3">
-          <h4 className="font-semibold">Статистика рефералов</h4>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-white/10 last:border-b-0">
-              <span className="text-gray-600 dark:text-gray-400">За все время</span>
-              <span className="font-semibold text-yellow-500 flex items-center">
-                +{referralStats?.totalEarnings || 0} <Star className="w-4 h-4 ml-1" />
-              </span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-white/10 last:border-b-0">
-              <span className="text-gray-600 dark:text-gray-400">Активных рефералов</span>
-              <span className="font-semibold text-[#4E7FFF]">
-                {referralStats?.totalReferrals || 0}
-              </span>
-            </div>
-          </div>
-        </div>
       </motion.div>
 
-      {/* Wallet Management */}
+      {/* Settings */}
       <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
@@ -5461,43 +5931,45 @@ export default function ProfileTab({ user }: ProfileTabProps) {
         transition={{ duration: 0.3, delay: 0.2 }}
       >
         <h3 className="text-lg font-semibold mb-4 flex items-center">
-          <Wallet className="w-5 h-5 text-[#4E7FFF] mr-2" />
-          Управление балансом
+          <Palette className="w-5 h-5 text-purple-500 mr-2" />
+          Настройки
         </h3>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <Button
-            onClick={() => hapticFeedback('light')}
-            className="bg-green-500 hover:bg-green-600 text-white py-3 rounded-lg flex items-center justify-center space-x-2"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Пополнить</span>
-          </Button>
-          <Button
-            onClick={() => hapticFeedback('light')}
-            variant="outline"
-            className="border-red-500 text-red-500 hover:bg-red-50 dark:hover:bg-red-950 py-3 rounded-lg flex items-center justify-center space-x-2"
-          >
-            <Minus className="w-4 h-4" />
-            <span>Вывести</span>
-          </Button>
-        </div>
-
-        <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-lg p-4 border border-white/10">
-          <div className="flex items-center space-x-2 mb-2">
-            <CreditCard className="w-4 h-4 text-[#4E7FFF]" />
-            <span className="font-semibold">Связанный кошелек</span>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Bell className="w-4 h-4 text-gray-500" />
+              <Label>Уведомления</Label>
+            </div>
+            <button
+              onClick={() => handleNotificationsToggle(!(user?.notifications_enabled ?? true))}
+              disabled={updateUserMutation.isPending}
+              className={`
+                relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+                ${user?.notifications_enabled ?? true ? 'bg-[#4E7FFF]' : 'bg-gray-300 dark:bg-gray-600'}
+                ${updateUserMutation.isPending ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+              `}
+            >
+              <span
+                className={`
+                  inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                  ${user?.notifications_enabled ?? true ? 'translate-x-6' : 'translate-x-1'}
+                `}
+              />
+            </button>
           </div>
-          <p className="text-gray-600 dark:text-gray-400 text-sm">
-            TON покупки автоматически отправляются в ваш Telegram кошелек
-          </p>
-          <div className="mt-2 text-xs text-gray-500 dark:text-gray-500">
-            ID: {user?.telegram_id || '123456789'}
-          </div>
+          
+          {/* Индикатор загрузки */}
+          {updateUserMutation.isPending && (
+            <div className="flex items-center text-sm text-gray-500">
+              <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full mr-2"></div>
+              Сохранение...
+            </div>
+          )}
         </div>
       </motion.div>
 
-      {/* Transaction History */}
+      {/* Purchase History */}
       <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
@@ -5509,77 +5981,194 @@ export default function ProfileTab({ user }: ProfileTabProps) {
           История покупок
         </h3>
 
-        <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
-                <Star className="w-5 h-5 text-yellow-500" />
-              </div>
-              <div>
-                <p className="font-medium">Покупка 100 звезд</p>
-                <p className="text-gray-600 dark:text-gray-400 text-sm">15 янв 2025, 14:30</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="font-semibold text-green-500">Успешно</p>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">₽241.50</p>
-            </div>
+        {transactionsLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#4E7FFF]"></div>
           </div>
-
-          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-white/10">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
-                <Receipt className="w-5 h-5 text-[#4E7FFF]" />
-              </div>
-              <div>
-                <p className="font-medium">Покупка 0.5 TON</p>
-                <p className="text-gray-600 dark:text-gray-400 text-sm">14 янв 2025, 10:15</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="font-semibold text-green-500">Успешно</p>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">₽220.76</p>
-            </div>
+        ) : transactionsError ? (
+          <div className="text-center py-8">
+            <p className="text-gray-500 dark:text-gray-400 mb-4">
+              Ошибка загрузки истории покупок
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => window.location.reload()}
+              className="mx-auto"
+            >
+              Обновить
+            </Button>
           </div>
-
-          <Button
-            onClick={() => hapticFeedback('light')}
-            variant="outline"
-            className="w-full mt-3 border-gray-200 dark:border-white/20 hover:bg-gray-50 dark:hover:bg-white/5"
-          >
-            <History className="w-4 h-4 mr-2" />
-            Показать всю историю
-          </Button>
-        </div>
+        ) : transactionsData?.transactions && transactionsData.transactions.length > 0 ? (
+          <div className="space-y-3">
+            {/* Первая транзакция - всегда видна */}
+            {renderTransactionItem(transactionsData.transactions[0])}
+            
+            {/* Вторая транзакция - показываем размыто если свернуто */}
+            {transactionsData.transactions.length > 1 && !isPurchaseHistoryExpanded && (
+              <div className="relative">
+                <div className="blur-sm pointer-events-none opacity-60">
+                  {renderTransactionItem(transactionsData.transactions[1])}
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-white dark:to-[#1A1A1C] pointer-events-none"></div>
+              </div>
+            )}
+            
+            {/* Остальные транзакции - показываем только если развернуто */}
+            {isPurchaseHistoryExpanded && transactionsData.transactions.slice(1).map((transaction: TransactionHistoryItem) => 
+              renderTransactionItem(transaction)
+            )}
+            
+            {/* Кнопка развернуть/свернуть */}
+            {transactionsData.transactions.length > 1 && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  hapticFeedback('light');
+                  setIsPurchaseHistoryExpanded(!isPurchaseHistoryExpanded);
+                }}
+                className="w-full text-[#4E7FFF] hover:bg-[#4E7FFF]/10"
+              >
+                {isPurchaseHistoryExpanded ? (
+                  <>
+                    <ChevronUp className="w-4 h-4 mr-2" />
+                    Свернуть
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-4 h-4 mr-2" />
+                    Показать все ({transactionsData.transactions.length})
+                  </>
+                )}
+              </Button>
+            )}
+            
+            {transactionsData.transactions.length > 10 && (
+              <div className="text-center pt-2">
+                <p className="text-gray-500 dark:text-gray-400 text-sm">
+                  Показаны последние транзакции
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <div className="w-16 h-16 bg-gray-100 dark:bg-[#0E0E10] rounded-full flex items-center justify-center mx-auto mb-4">
+              <ShoppingCart className="w-8 h-8 text-gray-400" />
+            </div>
+            <h4 className="text-lg font-semibold mb-2">Покупок пока нет</h4>
+            <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
+              Совершите первую покупку Stars или TON
+            </p>
+            <Button
+              onClick={handleGoToBuy}
+              className="bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white"
+            >
+              <ShoppingCart className="w-4 h-4 mr-2" />
+              За покупками
+            </Button>
+          </div>
+        )}
       </motion.div>
 
-      {/* Settings */}
+      {/* Completed Tasks History */}
       <motion.div
         className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-gray-200 dark:border-white/10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.3 }}
+        transition={{ duration: 0.3, delay: 0.4 }}
       >
         <h3 className="text-lg font-semibold mb-4 flex items-center">
-          <Palette className="w-5 h-5 text-gray-500 mr-2" />
-          Настройки
+          <Gift className="w-5 h-5 text-green-500 mr-2" />
+          Выполненные задания
         </h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Bell className="w-4 h-4 text-gray-500" />
-              <span>Уведомления</span>
-            </div>
-            <Switch defaultChecked />
+
+        {tasksLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#4E7FFF]"></div>
           </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Palette className="w-4 h-4 text-gray-500" />
-              <span>Темная тема</span>
-            </div>
-            <Switch defaultChecked />
+        ) : tasksError ? (
+          <div className="text-center py-8">
+            <p className="text-gray-500 dark:text-gray-400 mb-4">
+              Ошибка загрузки выполненных заданий
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => window.location.reload()}
+              className="mx-auto"
+            >
+              Обновить
+            </Button>
           </div>
-        </div>
+        ) : completedTasksData?.completed_tasks && completedTasksData.completed_tasks.length > 0 ? (
+          <div className="space-y-3">
+            {/* Первое задание - всегда видно */}
+            {renderCompletedTaskItem(completedTasksData.completed_tasks[0])}
+            
+            {/* Второе задание - показываем размыто если свернуто */}
+            {completedTasksData.completed_tasks.length > 1 && !isTasksHistoryExpanded && (
+              <div className="relative">
+                <div className="blur-sm pointer-events-none opacity-60">
+                  {renderCompletedTaskItem(completedTasksData.completed_tasks[1])}
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-white dark:to-[#1A1A1C] pointer-events-none"></div>
+              </div>
+            )}
+            
+            {/* Остальные задания - показываем только если развернуто */}
+            {isTasksHistoryExpanded && completedTasksData.completed_tasks.slice(1).map((task: CompletedTaskHistoryItem) => 
+              renderCompletedTaskItem(task)
+            )}
+            
+            {/* Кнопка развернуть/свернуть */}
+            {completedTasksData.completed_tasks.length > 1 && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  hapticFeedback('light');
+                  setIsTasksHistoryExpanded(!isTasksHistoryExpanded);
+                }}
+                className="w-full text-green-500 hover:bg-green-500/10"
+              >
+                {isTasksHistoryExpanded ? (
+                  <>
+                    <ChevronUp className="w-4 h-4 mr-2" />
+                    Свернуть
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-4 h-4 mr-2" />
+                    Показать все ({completedTasksData.completed_tasks.length})
+                  </>
+                )}
+              </Button>
+            )}
+            
+            {completedTasksData.completed_tasks.length > 10 && (
+              <div className="text-center pt-2">
+                <p className="text-gray-500 dark:text-gray-400 text-sm">
+                  Показаны последние выполненные задания
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <div className="w-16 h-16 bg-gray-100 dark:bg-[#0E0E10] rounded-full flex items-center justify-center mx-auto mb-4">
+              <Target className="w-8 h-8 text-gray-400" />
+            </div>
+            <h4 className="text-lg font-semibold mb-2">Заданий пока не выполнено</h4>
+            <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
+              Выполните первое задание и получите звезды
+            </p>
+            <Button
+              onClick={handleGoToTasks}
+              className="bg-green-500 hover:bg-green-600 text-white"
+            >
+              <Target className="w-4 h-4 mr-2" />
+              К заданиям
+            </Button>
+          </div>
+        )}
       </motion.div>
     </div>
   );
@@ -6471,7 +7060,7 @@ export default function TelegramApp() {
                 </div>
               </div>
             )}
-            {currentTab === 'profile' && <ProfileTab user={currentUser} />}
+            {currentTab === 'profile' && <ProfileTab user={currentUser} onTabChange={handleTabChange} />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -7080,6 +7669,44 @@ export {
   BreadcrumbEllipsis,
 }
 
+
+================================================================================
+FILE: frontend\src\components\ui\button-withdrawal.tsx
+================================================================================
+
+import React from "react";
+
+interface ButtonWithdrawalProps {
+  onClick: () => void;
+  disabled?: boolean;
+}
+
+const ButtonWithdrawal: React.FC<ButtonWithdrawalProps> = ({ onClick, disabled = false }) => {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`
+        bg-gradient-to-r from-[#6B48FF] to-[#A64DFF] text-white font-semibold rounded-lg flex items-center justify-center px-4 py-2
+        ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:opacity-80'}
+        transition-opacity duration-200
+      `}
+    >
+      <svg
+        className="w-4 h-4 mr-2"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+      </svg>
+      Вывести
+    </button>
+  );
+};
+
+export default ButtonWithdrawal;
 
 ================================================================================
 FILE: frontend\src\components\ui\button.tsx
@@ -8385,11 +9012,18 @@ import {
   DollarSign,
   Activity,
   ArrowLeft,
+  Bell, 
+  Palette, 
+  Receipt, 
+  ChevronDown, 
+  ChevronUp, 
+  Target, 
+  Gift,
 } from "lucide-react";
 
 // Конфигурация кастомных иконок с более надежными источниками
 const ICON_URLS = {
-  star: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTUuMDkgOC4yNkwyMiA5TDE3IDEzLjc0TDE4LjE4IDIxTDEyIDE3Ljc3TDUuODIgMjFMNyAxMy43NEwyIDlMOC45MSA4LjI2TDEyIDJaIiBmaWxsPSIjRkZENzAwIi8+Cjwvc3ZnPgo=",
+  star: "https://pikaso.cdnpk.net/private/production/2265326327/upload.png?token=exp=1774483200~hmac=13f1b9086da73cf1a35a5cd50fb0e06d4c32cc1e8a746780c4c6fcfc054e9eb7",
   bitcoin: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiIGZpbGw9IiNGNzk0MUEiLz4KPHA+dGggZD0iTTEzLjUgNy41VjZIMTJWNy41SDEwLjVWOUgxMlY2SDEzLjVaTTEwLjUgOS4ySDEyVjEySDEzLjVWMTRIMTJWMTVIMTAuNVYxNEg5VjEySDEwLjVWOS4yWiIgZmlsbD0iI0ZGRkZGRiIvPgo8L3N2Zz4K",
   ton: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiIGZpbGw9IiMwMDg4Q0MiLz4KPHRleHQgeD0iMTIiIHk9IjE2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ3aGl0ZSIgZm9udC1zaXplPSIxMiIgZm9udC13ZWlnaHQ9ImJvbGQiPlQ8L3RleHQ+Cjwvc3ZnPgo=",
   telegram: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiIGZpbGw9IiMyQUFCRUUiLz4KPHBhdGggZD0iTTEwIDEzLjVMOS41IDE3TDggMTZMMTYgOEw5IDEzSDEwVjEzLjVaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K",
@@ -8540,6 +9174,10 @@ export {
   DollarSign,
   Activity,
   ArrowLeft,
+  Bell, 
+  Palette,Receipt,
+  ChevronDown, ChevronUp, Target, Gift
+
 };
 
 ================================================================================
@@ -9922,13 +10560,13 @@ const Progress = React.forwardRef<
   <ProgressPrimitive.Root
     ref={ref}
     className={cn(
-      "relative h-4 w-full overflow-hidden rounded-full bg-secondary",
+      "relative h-4 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700",
       className
     )}
     {...props}
   >
     <ProgressPrimitive.Indicator
-      className="h-full w-full flex-1 bg-primary transition-all"
+      className="h-full w-full flex-1 bg-gradient-to-r from-[#4E7FFF] to-purple-500 transition-all duration-500 ease-out"
       style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
     />
   </ProgressPrimitive.Root>
@@ -9936,7 +10574,6 @@ const Progress = React.forwardRef<
 Progress.displayName = ProgressPrimitive.Root.displayName
 
 export { Progress }
-
 
 ================================================================================
 FILE: frontend\src\components\ui\radio-group.tsx
@@ -11513,6 +12150,9 @@ export { Textarea }
 FILE: frontend\src\components\ui\toast.tsx
 ================================================================================
 
+// В файле frontend/src/components/ui/toast.tsx
+// Замените весь файл или найдите и замените эти части:
+
 import * as React from "react"
 import * as ToastPrimitives from "@radix-ui/react-toast"
 import { cva, type VariantProps } from "class-variance-authority"
@@ -11538,13 +12178,13 @@ const ToastViewport = React.forwardRef<
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
+  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-lg border p-6 pr-8 shadow-2xl backdrop-blur-md transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
   {
     variants: {
       variant: {
-        default: "border bg-background text-foreground",
+        default: "border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 text-gray-900 dark:text-gray-100 shadow-lg",
         destructive:
-          "destructive group border-destructive bg-destructive text-destructive-foreground",
+          "destructive group border-red-200 dark:border-red-800 bg-red-50/95 dark:bg-red-950/95 text-red-900 dark:text-red-100",
       },
     },
     defaultVariants: {
@@ -11590,7 +12230,7 @@ const ToastClose = React.forwardRef<
   <ToastPrimitives.Close
     ref={ref}
     className={cn(
-      "absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity hover:text-foreground focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100 group-[.destructive]:text-red-300 group-[.destructive]:hover:text-red-50 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
+      "absolute right-2 top-2 rounded-md p-1 text-gray-600 dark:text-gray-400 opacity-70 transition-opacity hover:text-gray-900 dark:hover:text-gray-100 hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100 group-[.destructive]:text-red-300 group-[.destructive]:hover:text-red-50 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
       className
     )}
     toast-close=""
@@ -11607,7 +12247,7 @@ const ToastTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitives.Title
     ref={ref}
-    className={cn("text-sm font-semibold", className)}
+    className={cn("text-sm font-semibold text-gray-900 dark:text-gray-100", className)}
     {...props}
   />
 ))
@@ -11619,7 +12259,7 @@ const ToastDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitives.Description
     ref={ref}
-    className={cn("text-sm opacity-90", className)}
+    className={cn("text-sm text-gray-700 dark:text-gray-300", className)}
     {...props}
   />
 ))
@@ -11637,10 +12277,9 @@ export {
   Toast,
   ToastTitle,
   ToastDescription,
-  ToastClose,
+  ToastClose, 
   ToastAction,
-}
-
+} 
 
 ================================================================================
 FILE: frontend\src\components\ui\toaster.tsx
