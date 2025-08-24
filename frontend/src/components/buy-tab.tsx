@@ -27,6 +27,16 @@ interface PaymentResponse {
  status: string;
 }
 
+interface PriceCalculation {
+  base_price: string;
+  currency: string;
+  amount: number;
+  // Только для звезд:
+  official_price?: string;
+  savings_amount?: string;
+  savings_percentage?: string;
+}
+
 export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabProps) {
  const [selectedCurrency, setSelectedCurrency] = useState<Currency>('stars');
  const [amount, setAmount] = useState('');
@@ -84,7 +94,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
  }, [recipientUsername]);
 
  // Calculate price
- const { data: priceCalculation } = useQuery({
+ const { data: priceCalculation } = useQuery<PriceCalculation>({
    queryKey: ['/api/purchase/calculate', selectedCurrency, amount],
    enabled: !!amount && parseFloat(amount) > 0,
    queryFn: async () => {
@@ -192,6 +202,14 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
  const handleCurrencySelect = (currency: Currency) => {
    hapticFeedback('light');
    setSelectedCurrency(currency);
+   
+   // Сбрасываем amount при смене валюты, чтобы избежать некорректных значений
+   const currentAmount = parseFloat(amount);
+   const minAmounts = { stars: 50, ton: 0.1 };
+   
+   if (amount && currentAmount < minAmounts[currency]) {
+     setAmount('');
+   }
  };
 
  const handleQuickBuy = (quickAmount: number) => {
@@ -213,7 +231,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
       await purchaseMutation.mutateAsync({
         currency: selectedCurrency,
         amount: parseFloat(amount),
-        rub_amount: parseFloat(priceCalculation?.total_price || '0'),
+        rub_amount: parseFloat(priceCalculation?.base_price || '0'),
         username: userPhoto ? recipientUsername : undefined,
       });
     } catch (error) {
@@ -395,26 +413,59 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
              animate={{ opacity: 1, scale: 1 }}
              transition={{ duration: 0.3 }}
            >
-             <div className="flex justify-between items-center mb-2">
-               <span className="text-gray-600 dark:text-gray-400">Стоимость:</span>
-               <span className="font-semibold">₽{parseFloat(priceCalculation.base_price).toLocaleString()}</span>
-             </div>
-             <div className="flex justify-between items-center mb-2">
-               <span className="text-gray-600 dark:text-gray-400">Наценка:</span>
-               <span className="font-semibold text-[#4E7FFF]">₽{parseFloat(priceCalculation.markup_amount).toLocaleString()}</span>
-             </div>
-             <hr className="border-gray-200 dark:border-white/10 my-2" />
-             <div className="flex justify-between items-center">
-               <span className="font-semibold">Итого:</span>
-               <motion.span
-                 className="font-bold text-lg text-[#4E7FFF]"
-                 initial={{ scale: 1 }}
-                 animate={{ scale: [1, 1.05, 1] }}
-                 transition={{ duration: 0.3 }}
-               >
-                 ₽{parseFloat(priceCalculation.total_price).toLocaleString()}
-               </motion.span>
-             </div>
+             {selectedCurrency === 'stars' ? (
+               // Отображение для звезд с экономией
+               <>
+                 {priceCalculation.official_price && (
+                   <div className="flex justify-between items-center mb-2">
+                     <span className="text-gray-600 dark:text-gray-400">Стоимость:</span>
+                     <span className="font-semibold line-through text-red-500">
+                       ₽{parseFloat(priceCalculation.official_price).toLocaleString()} (за офф стоимость)
+                     </span>
+                   </div>
+                 )}
+                 {priceCalculation.savings_percentage && (
+                   <div className="flex justify-between items-center mb-2">
+                     <span className="text-gray-600 dark:text-gray-400">Скидка:</span>
+                     <span className="font-semibold text-green-500">
+                       {priceCalculation.savings_percentage}%
+                     </span>
+                   </div>
+                 )}
+                 <hr className="border-gray-200 dark:border-white/10 my-2" />
+                 <div className="flex justify-between items-center">
+                   <span className="font-semibold">Итого:</span>
+                   <motion.span
+                     className="font-bold text-lg text-[#4E7FFF]"
+                     initial={{ scale: 1 }}
+                     animate={{ scale: [1, 1.05, 1] }}
+                     transition={{ duration: 0.3 }}
+                   >
+                     ₽{parseFloat(priceCalculation.base_price).toLocaleString()}
+                   </motion.span>
+                 </div>
+               </>
+             ) : (
+               // Отображение для TON - только стоимость и итого
+               <>
+                 <div className="flex justify-between items-center mb-2">
+                   <span className="text-gray-600 dark:text-gray-400">Стоимость:</span>
+                   <span className="font-semibold">₽{parseFloat(priceCalculation.base_price).toLocaleString()}</span>
+                 </div>
+                 <hr className="border-gray-200 dark:border-white/10 my-2" />
+                 <div className="flex justify-between items-center">
+                   <span className="font-semibold">Итого:</span>
+                   <motion.span
+                     className="font-bold text-lg text-[#4E7FFF]"
+                     initial={{ scale: 1 }}
+                     animate={{ scale: [1, 1.05, 1] }}
+                     transition={{ duration: 0.3 }}
+                   >
+                     ₽{parseFloat(priceCalculation.base_price).toLocaleString()}
+                   </motion.span>
+                 </div>
+               </>
+             )}
            </motion.div>
          )}
 
