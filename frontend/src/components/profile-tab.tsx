@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { useQuery, useMutation, useQueryClient, useEffect } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient} from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useTelegram } from "@/hooks/use-telegram";
 import { useUserAvatar } from "@/hooks/use-user-avatar";
@@ -70,10 +70,6 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
     refetchOnMount: true, // Обновляем при монтировании
   });
 
-  // Добавьте отладочную информацию в консоль:
-  useEffect(() => {
-    console.log('🎯 Current referralStats:', referralStats);
-  }, [referralStats]);
 
   const { data: referralConfig } = useQuery({
     queryKey: ['/api/config/referral'],
