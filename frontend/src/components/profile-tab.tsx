@@ -148,12 +148,32 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
   const shareReferralLink = () => {
     hapticFeedback('medium');
     
+    const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code}`;
+    
     if (window.Telegram?.WebApp) {
-      // Используем пустой запрос - бот сам отформатирует
-      window.Telegram.WebApp.switchInlineQuery("", ['users', 'groups', 'channels']);
+      try {
+        // Пробуем использовать openTelegramLink для inline режима
+        const botUsername = referralConfig?.bot_base_url?.split('/').pop(); // Извлекаем username
+        const inlineUrl = `https://t.me/${botUsername}?start=inline`;
+        
+        window.Telegram.WebApp.openTelegramLink(inlineUrl);
+      } catch (error) {
+        console.log('openTelegramLink failed, trying alternative method');
+        
+        // Альтернативный метод - открыть бота напрямую
+        try {
+          window.Telegram.WebApp.openTelegramLink(referralLink);
+        } catch (secondError) {
+          // Последний fallback - копировать ссылку
+          copyReferralLink();
+          toast({
+            title: "Ссылка скопирована",
+            description: "Поделитесь ей с друзьями вручную",
+          });
+        }
+      }
     } else {
-      // Fallback для браузера - обычная ссылка
-      const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code}`;
+      // Fallback для браузера
       const shareText = referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON!';
       
       if (navigator.share) {
