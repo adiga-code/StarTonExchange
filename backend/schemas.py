@@ -9,6 +9,7 @@ class UserCreate(BaseModel):
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    referred_by: Optional[str] = None
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None

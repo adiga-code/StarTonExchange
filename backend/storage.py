@@ -31,8 +31,15 @@ class Storage:
         return result.scalar_one_or_none()
     
     async def create_user(self, user_data: UserCreate) -> User:
-        # Generate referral code
-        referral_code = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+        # Генерируем уникальный код (до 10 попыток)
+        for _ in range(10):
+            referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
+            if not await self.get_user_by_referral_code(referral_code):
+                break
+        else:
+            # Fallback на UUID если не получилось
+            import uuid
+            referral_code = str(uuid.uuid4())[:10].upper()
         
         user = User(
             telegram_id=user_data.telegram_id,
@@ -40,6 +47,7 @@ class Storage:
             first_name=user_data.first_name,
             last_name=user_data.last_name,
             referral_code=referral_code,
+            referred_by=user_data.referred_by
         )
         
         self.db.add(user)
@@ -242,6 +250,82 @@ class Storage:
         )
         await self.db.commit()
         return await self.get_user_task(user_id, task_id)
+
+    async def get_user_by_referral_code(self, referral_code: str) -> Optional[User]:
+        """Найти пользователя по реферальному коду"""
+        try:
+            result = await self.db.execute(
+                select(User).where(User.referral_code == referral_code)
+            )
+            return result.scalar_one_or_none()
+        except Exception as e:
+            return None
+
+    async def add_user_stars(self, user_id: str, stars_amount: int) -> Optional[User]:
+        """Начислить звезды пользователю"""
+        try:
+            user = await self.get_user(user_id)
+            if not user:
+                return None
+            
+            updates = {
+                "stars_balance": user.stars_balance + stars_amount,
+                "total_stars_earned": user.total_stars_earned + stars_amount
+            }
+            
+            updated_user = await self.update_user(user_id, updates)
+            return updated_user
+            
+        except Exception as e:
+            return None
+
+    async def process_referral_bonus(self, referrer_user_id: str, bonus_amount: int):
+        """Начислить реферальный бонус за покупку друга"""
+        try:
+            referrer = await self.get_user(referrer_user_id)
+            if not referrer:
+                return
+            
+            # Начисляем бонус
+            updates = {
+                "stars_balance": referrer.stars_balance + bonus_amount,
+                "total_referral_earnings": referrer.total_referral_earnings + bonus_amount,
+                "total_stars_earned": referrer.total_stars_earned + bonus_amount
+            }
+            
+            await self.update_user(referrer_user_id, updates)
+            from decimal import Decimal; 
+            # Создаем транзакцию для истории
+            from schemas import TransactionCreate
+            transaction_data = TransactionCreate(
+                user_id=referrer_user_id,
+                type="referral_bonus",
+                currency="stars",
+                amount=Decimal(str(bonus_amount)),
+                status="completed",
+                description=f"Реферальный бонус: {bonus_amount} звезд с покупки друга"
+            )
+            await self.create_transaction(transaction_data)
+            
+            
+        except Exception as e:
+            None
+    async def process_referral_registration(self, referrer_user_id: str, new_user_id: str):
+        """Обработать регистрацию нового пользователя по реферальной ссылке"""
+        try:
+            # Получаем бонус за приглашение из настроек
+            registration_bonus = await self.get_cached_setting("referral_registration_bonus")
+            if not registration_bonus:
+                registration_bonus = "25"  # Значение по умолчанию
+            
+            bonus_amount = int(registration_bonus)
+            
+            # Начисляем бонус за приглашение
+            await self.process_referral_bonus(referrer_user_id, bonus_amount)
+            
+            
+        except Exception as e:
+            pass
 
     async def get_completed_user_tasks(self, user_id: str) -> List[UserTask]:
         """Получить все выполненные задания пользователя"""

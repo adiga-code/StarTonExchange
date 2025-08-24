@@ -35,26 +35,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def get_or_create_user(telegram_user) -> bool:
-    """Get or create user in database"""
+async def get_or_create_user(telegram_user, referrer_user_id=None) -> bool:
+    """Get or create user in database with referral support"""
     async with AsyncSessionLocal() as session:
         storage_instance = Storage(session)
         
-        # Check if user exists
+        # Проверяем, существует ли пользователь
         existing_user = await storage_instance.get_user_by_telegram_id(str(telegram_user.id))
         
         if not existing_user:
-            # Create new user
+            # Создаем нового пользователя
             user_data = UserCreate(
                 telegram_id=str(telegram_user.id),
                 username=telegram_user.username,
                 first_name=telegram_user.first_name,
                 last_name=telegram_user.last_name,
+                referred_by=referrer_user_id  # ВАЖНО: устанавливаем реферера
             )
             
             try:
                 new_user = await storage_instance.create_user(user_data)
                 logger.info(f"Created new user: {new_user.id} (Telegram ID: {telegram_user.id})")
+                
+                # Если есть реферер, начисляем ему бонус за приглашение
+                if referrer_user_id:
+                    await storage_instance.process_referral_registration(referrer_user_id, new_user.id)
+                    logger.info(f"Processed referral registration bonus for referrer: {referrer_user_id}")
+                
                 return True
             except Exception as e:
                 logger.error(f"Error creating user: {e}")
@@ -65,19 +72,52 @@ async def get_or_create_user(telegram_user) -> bool:
 
 @router.message(CommandStart())
 async def start_command(message: Message):
-    """Handle /start command"""
+    """Handle /start command with referral support"""
     user = message.from_user
     
-    # Create or get user
-    user_created = await get_or_create_user(user)
+    # Извлекаем аргументы команды /start (реферальный код)
+    command_args = message.text.split()[1:] if message.text and len(message.text.split()) > 1 else []
+    referrer_user_id = None
+    
+    if command_args:
+        referral_param = command_args[0]
+        logger.info(f"Start command with parameter: {referral_param}")
+        
+        # Получаем префикс из настроек для проверки
+        async with AsyncSessionLocal() as session:
+            storage_instance = Storage(session)
+            prefix = await storage_instance.get_cached_setting("referral_prefix")
+            
+            # Проверяем, что параметр начинается с нашего префикса
+            if referral_param.startswith(prefix):
+                referral_code = referral_param[len(prefix):]
+                logger.info(f"Extracted referral code: {referral_code}")
+                
+                # Ищем пользователя-реферера по коду
+                referrer_user = await storage_instance.get_user_by_referral_code(referral_code)
+                if referrer_user:
+                    referrer_user_id = referrer_user.id
+                    logger.info(f"Found referrer: {referrer_user.telegram_id} for new user: {user.id}")
+                else:
+                    logger.warning(f"Referrer not found for code: {referral_code}")
+    
+    # Создаем или получаем пользователя с реферером
+    user_created = await get_or_create_user(user, referrer_user_id)
     
     if not user_created:
-        await message.answer(
-            "❌ Произошла ошибка при регистрации. Попробуйте позже."
-        )
+        await message.answer("❌ Произошла ошибка при регистрации.")
         return
     
-    # Create inline keyboard with Web App button
+    # Формируем приветственное сообщение
+    welcome_text = "🎉 <b>Добро пожаловать в Stars Exchange!</b>\n\n"
+    welcome_text += "💫 Обменивайте Telegram Stars на TON и обратно с лучшими курсами!\n\n"
+    
+    if referrer_user_id:
+        welcome_text += "🎁 <b>Вы пришли по реферальной ссылке!</b>\n"
+        welcome_text += "Ваш друг получит бонус за приглашение, а вы - за активность!\n\n"
+    
+    welcome_text += "🚀 Нажмите кнопку ниже, чтобы начать:"
+    
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -88,39 +128,18 @@ async def start_command(message: Message):
             ],
             [
                 InlineKeyboardButton(
-                    text="📢 Новости",
-                    url="https://t.me/starsexchange_news"
+                    text="👥 Рефералы",
+                    callback_data="referrals"
+                ),
+                InlineKeyboardButton(
+                    text="💰 Баланс", 
+                    callback_data="balance"
                 )
             ]
         ]
     )
     
-    welcome_text = f"""
-🌟 <b>Добро пожаловать в Stars Exchange!</b>
-
-Привет, {user.first_name}! 👋
-
-🔥 <b>У нас вы можете:</b>
-⭐ Покупать Telegram Stars
-💎 Обменивать TON Coin
-🎁 Выполнять задания за награды
-👥 Зарабатывать на рефералах
-
-💰 <b>Специальные предложения:</b>
-• Бонус +10 звезд за ежедневный вход
-• 25 звезд за каждого приглашенного друга
-• 50 звезд за подписку на наш канал
-
-🚀 <b>Нажмите кнопку ниже, чтобы начать!</b>
-    """
-    try:
-        await message.answer(
-            welcome_text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
-    except:
-        logger.error("Failed to send welcome message. Check bot permissions and settings.")
+    await message.answer(welcome_text, reply_markup=keyboard, parse_mode="HTML")
         
 @router.message(F.text == "💰 Баланс")
 async def balance_command(message: Message):

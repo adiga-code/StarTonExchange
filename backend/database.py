@@ -51,6 +51,7 @@ async def init_default_data():
             Setting(key="bot_base_url", value="https://t.me/starsexchange_bot"),
             Setting(key="referral_prefix", value="ref"),
             Setting(key="referral_bonus_percentage", value="10"),
+            Setting(key="referral_registration_bonus", value="25"),
             Setting(key="copy_success", value="Ссылка скопирована!"),
             Setting(key="copy_error", value="Не удалось скопировать ссылку"),
             Setting(key="loading", value="Загрузка..."),
