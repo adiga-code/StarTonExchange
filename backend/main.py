@@ -850,6 +850,9 @@ async def update_admin_settings(
             await storage.update_setting("referral_prefix", settings.referral_prefix)
         if settings.referral_bonus_percentage:
             await storage.update_setting("referral_bonus_percentage", settings.referral_bonus_percentage)
+        if settings.referral_registration_bonus:
+            await storage.update_setting("referral_registration_bonus", settings.referral_registration_bonus)
+            logger.info(f"✅ Updating referral_registration_bonus to: {settings.referral_registration_bonus}")
         
         return {"success": True}
     except Exception as e:
@@ -1094,7 +1097,8 @@ async def get_admin_settings(storage: Storage = Depends(get_storage)):
         # "markup_percentage": await storage.get_cached_setting("markup_percentage"),
         "bot_base_url": await storage.get_cached_setting("bot_base_url"),
         "referral_prefix": await storage.get_cached_setting("referral_prefix"),
-        "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage")
+        "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage"),
+        "referral_registration_bonus": await storage.get_cached_setting("referral_registration_bonus")
     }
 
 @app.get("/api/config/referral")

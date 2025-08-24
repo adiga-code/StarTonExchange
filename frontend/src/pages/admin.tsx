@@ -37,6 +37,7 @@ type CurrentSettings = {
   bot_base_url?: string;
   referral_prefix?: string;
   referral_bonus_percentage?: string | number;
+  referral_registration_bonus?: string | number;
 };
 
 export default function AdminPage(): JSX.Element {
@@ -45,7 +46,7 @@ export default function AdminPage(): JSX.Element {
   const [botBaseUrl, setBotBaseUrl] = useState<string>("");
   const [referralPrefix, setReferralPrefix] = useState<string>("");
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
-
+  const [referralRegistrationBonus, setReferralRegistrationBonus] = useState<string>("");
   const { toast } = useToast();
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
@@ -86,6 +87,7 @@ export default function AdminPage(): JSX.Element {
     setBotBaseUrl(currentSettings.bot_base_url || "");
     setReferralPrefix(currentSettings.referral_prefix || "");
     setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, ""));
+    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
   }, [currentSettings]);
 
   const { data: adminStats } = useQuery<AdminStats, Error>({
@@ -138,7 +140,7 @@ export default function AdminPage(): JSX.Element {
   });
 
   const handleUpdatePrices = () => {
-    if (!starsPrice || !tonPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage) {
+    if (!starsPrice || !tonPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage || !referralRegistrationBonus) {
       toast({ title: "Ошибка валидации", description: "Все поля должны быть заполнены", variant: "destructive" });
       return;
     }
@@ -146,12 +148,14 @@ export default function AdminPage(): JSX.Element {
     const s = parseNumberOrNaN(starsPrice);
     const t = parseNumberOrNaN(tonPrice);
     const rbp = parseNumberOrNaN(referralBonusPercentage);
+    const rrb = parseNumberOrNaN(referralRegistrationBonus); // ← НОВОЕ
 
-    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(rbp)) {
+    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(rbp) || Number.isNaN(rrb)) {
       toast({ title: "Ошибка валидации", description: "Пожалуйста, введите корректные числовые значения.", variant: "destructive" });
       return;
     }
-    if (s <= 0 || t <= 0 || rbp < 0) {
+    
+    if (s <= 0 || t <= 0 || rbp < 0 || rrb < 0) {
       toast({ title: "Ошибка валидации", description: "Цены и проценты должны быть положительными числами.", variant: "destructive" });
       return;
     }
@@ -162,9 +166,9 @@ export default function AdminPage(): JSX.Element {
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
       referral_bonus_percentage: String(rbp),
+      referral_registration_bonus: String(rrb), // ← НОВОЕ
     };
 
-    console.log("🔥 Frontend prepared payload (string values):", payload, "stringified:", JSON.stringify(payload));
     updateSettingsMutation.mutate(payload);
   };
 
@@ -232,6 +236,16 @@ export default function AdminPage(): JSX.Element {
               <div>
                 <Label className="text-sm text-gray-600 dark:text-gray-400">Процент бонуса (%)</Label>
                 <Input type="text" value={referralBonusPercentage} onChange={(e) => setReferralBonusPercentage(e.target.value)} placeholder="5" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+              </div>
+              {/* ✅ НОВОЕ ПОЛЕ: Награда за приглашение */}
+              <div>
+                <Label>Награда за приглашение (звезды)</Label>
+                <Input
+                  type="number"
+                  value={referralRegistrationBonus}
+                  onChange={(e) => setReferralRegistrationBonus(e.target.value)}
+                  placeholder="25"
+                />
               </div>
             </div>
           </motion.div>
