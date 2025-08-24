@@ -596,13 +596,18 @@ async def check_task_requirements(user: User, requirements_json: str, storage: S
         return True  # Если JSON невалидный, разрешаем выполнение
 
 @app.get("/api/referrals/stats", response_model=ReferralStats)
+@app.get("/api/referrals/stats", response_model=ReferralStats)
 async def get_referral_stats_v2(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
     try:
+        logger.info(f"🎯 Getting referral stats for user: {current_user.id} (telegram: {current_user.telegram_id})")
+        
         # Получаем всех рефералов пользователя
         referrals = await storage.get_user_referrals(current_user.id)
+        
+        logger.info(f"🎯 get_user_referrals returned: {len(referrals)} items")
         
         # Формируем список рефералов для ответа
         referral_list = []
@@ -614,26 +619,30 @@ async def get_referral_stats_v2(
                 "created_at": referral.created_at.isoformat() if referral.created_at else None
             }
             referral_list.append(referral_data)
+            logger.info(f"  📋 Added referral: {referral.id} ({referral.username})")
         
-        # Логируем для отладки
-        logger.info(f"User {current_user.id} has {len(referral_list)} referrals")
-        
-        return ReferralStats(
+        result = ReferralStats(
             total_referrals=len(referral_list),  # Правильный подсчет
             total_earnings=current_user.total_referral_earnings or 0,
             referral_code=current_user.referral_code,
             referrals=referral_list
         )
         
+        logger.info(f"🎯 Final result: total_referrals={result.total_referrals}")
+        return result
+        
     except Exception as e:
-        logger.error(f"Error getting referral stats for user {current_user.id}: {e}", exc_info=True)
+        logger.error(f"❌ Error getting referral stats for user {current_user.id}: {e}", exc_info=True)
+        
         # Возвращаем пустые данные вместо ошибки
-        return ReferralStats(
+        fallback_result = ReferralStats(
             total_referrals=0,
             total_earnings=current_user.total_referral_earnings or 0,
             referral_code=current_user.referral_code,
             referrals=[]
         )
+        logger.info(f"🎯 Returning fallback result: {fallback_result}")
+        return fallback_result
     
 # Payment webhook and status routes
 @app.post("/api/payment/webhook/robokassa")

@@ -32,29 +32,44 @@ class Storage:
     
     async def get_user_referrals(self, user_id: str) -> List[User]:
         """Получить всех рефералов конкретного пользователя"""
-        import logging
-        logger = logging.getLogger(__name__)
         try:
-            logger.info(f"Getting referrals for user_id: {user_id}")
+            import logging
+            logger = logging.getLogger(__name__)
             
-            result = await self.db.execute(
-                select(User)
-                .where(User.referred_by == user_id)
-                .order_by(User.created_at.desc())  # Сортируем по дате создания
-            )
+            logger.info(f"🔍 Getting referrals for user_id: {user_id}")
+            logger.info(f"🔍 user_id type: {type(user_id)}")
+            
+            # Сначала проверим, есть ли пользователи с заполненным referred_by вообще
+            all_users_query = select(User).where(User.referred_by.isnot(None))
+            all_with_referrer = await self.db.execute(all_users_query)
+            all_referred_users = all_with_referrer.scalars().all()
+            
+            logger.info(f"🔍 Total users with referrer in DB: {len(all_referred_users)}")
+            for user in all_referred_users:
+                logger.info(f"  - User {user.id} (telegram: {user.telegram_id}) referred by: {user.referred_by}")
+            
+            # Теперь ищем конкретных рефералов
+            query = select(User).where(User.referred_by == user_id)
+            logger.info(f"🔍 Executing query: {query}")
+            
+            result = await self.db.execute(query)
             referrals = result.scalars().all()
             
-            logger.info(f"Found {len(referrals)} referrals for user {user_id}")
+            logger.info(f"🔍 Found {len(referrals)} referrals for user {user_id}")
             
-            # Дополнительная отладка - покажем ID рефералов
             if referrals:
-                referral_ids = [r.id for r in referrals]
-                logger.info(f"Referral IDs: {referral_ids}")
-            
+                logger.info(f"🔍 Referral details:")
+                for ref in referrals:
+                    logger.info(f"  - ID: {ref.id}, telegram_id: {ref.telegram_id}, username: {ref.username}")
+            else:
+                logger.warning(f"🔍 No referrals found for user_id: {user_id}")
+                
             return referrals
             
         except Exception as e:
-            logger.error(f"Error getting user referrals for {user_id}: {e}", exc_info=True)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"❌ Error in get_user_referrals: {e}", exc_info=True)
             return []
         
     async def create_user(self, user_data: UserCreate) -> User:
