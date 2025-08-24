@@ -30,6 +30,19 @@ class Storage:
         )
         return result.scalar_one_or_none()
     
+    async def get_user_referrals(self, user_id: str) -> List[User]:
+        """Получить всех рефералов конкретного пользователя"""
+        try:
+            result = await self.db.execute(
+                select(User).where(User.referred_by == user_id)
+            )
+            return result.scalars().all()
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error getting user referrals: {e}")
+            return []
+        
     async def create_user(self, user_data: UserCreate) -> User:
         # Генерируем уникальный код (до 10 попыток)
         for _ in range(10):

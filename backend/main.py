@@ -595,46 +595,37 @@ async def check_task_requirements(user: User, requirements_json: str, storage: S
     except json.JSONDecodeError:
         return True  # Если JSON невалидный, разрешаем выполнение
 
-# Referral routes
 @app.get("/api/referrals/stats", response_model=ReferralStats)
-async def get_referral_stats(
+async def get_referral_stats_v2(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
     try:
-        all_users = await storage.get_all_users()
-        referrals = [u for u in all_users if u.referred_by == current_user.id]
+        # Используем прямой запрос рефералов (добавьте метод get_user_referrals в Storage)
+        referrals = await storage.get_user_referrals(current_user.id)
         
+        # Формируем список рефералов
         referral_list = []
-        for r in referrals:
-            # Безопасное получение атрибутов с проверкой типа
-            if isinstance(r, dict):
-                # Если r - это словарь
-                referral_list.append({
-                    "id": r.get("id"),
-                    "username": r.get("username"),
-                    "first_name": r.get("first_name"),
-                    "created_at": r.get("created_at").isoformat() if r.get("created_at") else None
-                })
-            else:
-                # Если r - это объект User из SQLAlchemy
-                referral_list.append({
-                    "id": r.id,
-                    "username": getattr(r, 'username', None),  # Безопасное получение атрибута
-                    "first_name": getattr(r, 'first_name', None),
-                    "created_at": r.created_at.isoformat() if hasattr(r, 'created_at') and r.created_at else None
-                })
+        for referral in referrals:
+            referral_data = {
+                "id": referral.id,
+                "username": referral.username,
+                "first_name": referral.first_name,
+                "created_at": referral.created_at.isoformat() if referral.created_at else None
+            }
+            referral_list.append(referral_data)
         
         return ReferralStats(
-            total_referrals=len(referrals),
+            total_referrals=len(referral_list),
             total_earnings=current_user.total_referral_earnings or 0,
             referral_code=current_user.referral_code,
             referrals=referral_list
         )
+        
     except Exception as e:
-        logger.error(f"Error getting referral stats: {e}", exc_info=True)  # Добавляем полный traceback
+        logger.error(f"Error getting referral stats: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to get referral stats")
-
+    
 # Payment webhook and status routes
 @app.post("/api/payment/webhook/robokassa")
 async def robokassa_webhook(
