@@ -233,7 +233,6 @@ class AdminSettingsUpdate(BaseModel):
     bot_base_url: Optional[str] = None
     referral_prefix: Optional[str] = None
     referral_bonus_percentage: Optional[str] = None
-    referral_registration_bonus: Optional[str] = None
 
 # Payment schemas
 class PaymentCreateResponse(BaseModel):

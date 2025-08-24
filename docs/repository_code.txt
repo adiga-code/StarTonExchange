@@ -704,7 +704,6 @@ async def init_default_data():
         # Initialize default settings
         default_settings = [
             Setting(key="stars_price", value="2.30"),
-            Setting(key="ton_price", value="420.50"),
             Setting(key="markup_percentage", value="5"),
             Setting(key="bot_base_url", value="https://t.me/starsexchange_bot"),
             Setting(key="referral_prefix", value="ref"),
@@ -714,6 +713,9 @@ async def init_default_data():
             Setting(key="copy_error", value="Не удалось скопировать ссылку"),
             Setting(key="loading", value="Загрузка..."),
             Setting(key="error", value="Ошибка"),
+            Setting(key="ton_markup_percentage", value="5"),
+            Setting(key="ton_price_cache_minutes", value="15"),
+            Setting(key="ton_fallback_price", value="420"),
         ]
         
         for setting in default_settings:
@@ -786,7 +788,7 @@ from dotenv import load_dotenv
 import base64
 from pyrogram import Client
 from pyrogram.errors import UsernameNotOccupied, UsernameInvalid, FloodWait, AuthKeyUnregistered
-
+from ton_price_service import ton_price_service
 
 # Load environment variables
 load_dotenv()
@@ -1110,7 +1112,7 @@ async def calculate_purchase(
         
         prices = {
             "stars": float(await storage.get_cached_setting("stars_price")),
-            "ton": float(await storage.get_cached_setting("ton_price")),
+            "ton": await ton_price_service.get_current_ton_price_rub(storage),
         }
         
         # Рассчитываем цену без наценки
@@ -1169,7 +1171,7 @@ async def make_purchase(
         # Get current prices without markup
         prices = {
             "stars": float(await storage.get_cached_setting("stars_price")),
-            "ton": float(await storage.get_cached_setting("ton_price")),
+            "ton": await ton_price_service.get_current_ton_price_rub(storage),
         }
         
         # Calculate total price without markup
@@ -1368,35 +1370,53 @@ async def check_task_requirements(user: User, requirements_json: str, storage: S
         return True  # Если JSON невалидный, разрешаем выполнение
 
 @app.get("/api/referrals/stats", response_model=ReferralStats)
+@app.get("/api/referrals/stats", response_model=ReferralStats)
 async def get_referral_stats_v2(
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
     try:
-        # Используем прямой запрос рефералов (добавьте метод get_user_referrals в Storage)
+        logger.info(f"🎯 Getting referral stats for user: {current_user.id} (telegram: {current_user.telegram_id})")
+        
+        # Получаем всех рефералов пользователя
         referrals = await storage.get_user_referrals(current_user.id)
         
-        # Формируем список рефералов
+        logger.info(f"🎯 get_user_referrals returned: {len(referrals)} items")
+        
+        # Формируем список рефералов для ответа
         referral_list = []
         for referral in referrals:
             referral_data = {
                 "id": referral.id,
-                "username": referral.username,
-                "first_name": referral.first_name,
+                "username": referral.username or "",
+                "first_name": referral.first_name or "",
                 "created_at": referral.created_at.isoformat() if referral.created_at else None
             }
             referral_list.append(referral_data)
+            logger.info(f"  📋 Added referral: {referral.id} ({referral.username})")
         
-        return ReferralStats(
-            total_referrals=len(referral_list),
+        result = ReferralStats(
+            total_referrals=len(referral_list),  # Правильный подсчет
             total_earnings=current_user.total_referral_earnings or 0,
             referral_code=current_user.referral_code,
             referrals=referral_list
         )
         
+        logger.info(f"🎯 Final result: total_referrals={result.total_referrals}")
+        return result
+        
     except Exception as e:
-        logger.error(f"Error getting referral stats: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to get referral stats")
+        logger.error(f"❌ Error getting referral stats for user {current_user.id}: {e}", exc_info=True)
+        
+        # Возвращаем пустые данные вместо ошибки
+        fallback_result = ReferralStats(
+            total_referrals=0,
+            total_earnings=current_user.total_referral_earnings or 0,
+            referral_code=current_user.referral_code,
+            referrals=[]
+        )
+        logger.info(f"🎯 Returning fallback result: {fallback_result}")
+        return fallback_result
     
 # Payment webhook and status routes
 @app.post("/api/payment/webhook/robokassa")
@@ -1604,6 +1624,9 @@ async def update_admin_settings(
             await storage.update_setting("referral_prefix", settings.referral_prefix)
         if settings.referral_bonus_percentage:
             await storage.update_setting("referral_bonus_percentage", settings.referral_bonus_percentage)
+        if settings.referral_registration_bonus:
+            await storage.update_setting("referral_registration_bonus", settings.referral_registration_bonus)
+            logger.info(f"✅ Updating referral_registration_bonus to: {settings.referral_registration_bonus}")
         
         return {"success": True}
     except Exception as e:
@@ -1844,11 +1867,14 @@ async def delete_task_admin(
 async def get_admin_settings(storage: Storage = Depends(get_storage)):
     return {
         "stars_price": await storage.get_cached_setting("stars_price"),
-        "ton_price": await storage.get_cached_setting("ton_price"),
-        # "markup_percentage": await storage.get_cached_setting("markup_percentage"),
+        "ton_markup_percentage": await storage.get_cached_setting("ton_markup_percentage"),
+        "ton_price_cache_minutes": await storage.get_cached_setting("ton_price_cache_minutes"), 
+        "ton_fallback_price": await storage.get_cached_setting("ton_fallback_price"),
+        "referral_registration_bonus": await storage.get_cached_setting("referral_registration_bonus"),
         "bot_base_url": await storage.get_cached_setting("bot_base_url"),
         "referral_prefix": await storage.get_cached_setting("referral_prefix"),
-        "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage")
+        "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage"),
+        "referral_registration_bonus": await storage.get_cached_setting("referral_registration_bonus")
     }
 
 @app.get("/api/config/referral")
@@ -2480,11 +2506,15 @@ class AdminStats(BaseModel):
 
 class AdminSettingsUpdate(BaseModel):
     stars_price: Optional[str] = None
-    ton_price: Optional[str] = None
+    ton_markup_percentage: Optional[str] = None
+    ton_price_cache_minutes: Optional[str] = None
+    ton_fallback_price: Optional[str] = None
+    referral_registration_bonus: Optional[str] = None
     #markup_percentage: Optional[str] = None
     bot_base_url: Optional[str] = None
     referral_prefix: Optional[str] = None
     referral_bonus_percentage: Optional[str] = None
+    referral_registration_bonus: Optional[str] = None
 
 # Payment schemas
 class PaymentCreateResponse(BaseModel):
@@ -2543,14 +2573,43 @@ class Storage:
     async def get_user_referrals(self, user_id: str) -> List[User]:
         """Получить всех рефералов конкретного пользователя"""
         try:
-            result = await self.db.execute(
-                select(User).where(User.referred_by == user_id)
-            )
-            return result.scalars().all()
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            logger.info(f"🔍 Getting referrals for user_id: {user_id}")
+            logger.info(f"🔍 user_id type: {type(user_id)}")
+            
+            # Сначала проверим, есть ли пользователи с заполненным referred_by вообще
+            all_users_query = select(User).where(User.referred_by.isnot(None))
+            all_with_referrer = await self.db.execute(all_users_query)
+            all_referred_users = all_with_referrer.scalars().all()
+            
+            logger.info(f"🔍 Total users with referrer in DB: {len(all_referred_users)}")
+            for user in all_referred_users:
+                logger.info(f"  - User {user.id} (telegram: {user.telegram_id}) referred by: {user.referred_by}")
+            
+            # Теперь ищем конкретных рефералов
+            query = select(User).where(User.referred_by == user_id)
+            logger.info(f"🔍 Executing query: {query}")
+            
+            result = await self.db.execute(query)
+            referrals = result.scalars().all()
+            
+            logger.info(f"🔍 Found {len(referrals)} referrals for user {user_id}")
+            
+            if referrals:
+                logger.info(f"🔍 Referral details:")
+                for ref in referrals:
+                    logger.info(f"  - ID: {ref.id}, telegram_id: {ref.telegram_id}, username: {ref.username}")
+            else:
+                logger.warning(f"🔍 No referrals found for user_id: {user_id}")
+                
+            return referrals
+            
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f"Error getting user referrals: {e}")
+            logger.error(f"❌ Error in get_user_referrals: {e}", exc_info=True)
             return []
         
     async def create_user(self, user_data: UserCreate) -> User:
@@ -3074,6 +3133,68 @@ async def get_current_user(storage, telegram_id: str = None, init_data: str = No
     
     user = await storage.get_user_by_telegram_id(str(user_data['id']))
     return user
+
+================================================================================
+FILE: backend\ton_price_service.py
+================================================================================
+
+import httpx
+import asyncio
+from datetime import datetime, timedelta
+from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+class TONPriceService:
+    def __init__(self):
+        self.last_price: Optional[float] = None
+        self.last_update: Optional[datetime] = None
+        
+    async def get_current_ton_price_rub(self, storage) -> float:
+        """Получить цену TON в рублях с наценкой"""
+        cache_minutes = int(await storage.get_cached_setting("ton_price_cache_minutes") or "15")
+        
+        # Проверяем кэш
+        if (self.last_price is None or 
+            self.last_update is None or 
+            datetime.utcnow() - self.last_update > timedelta(minutes=cache_minutes)):
+            
+            try:
+                # Получаем цену TON/USDT с Binance (бесплатно)
+                async with httpx.AsyncClient() as client:
+                    response = await client.get("https://api.binance.com/api/v3/ticker/price?symbol=TONUSDT", timeout=10)
+                    if response.status_code == 200:
+                        ton_usd = float(response.json()["price"])
+                        
+                        # Получаем курс USD/RUB
+                        usd_response = await client.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=10)
+                        if usd_response.status_code == 200:
+                            usd_rub = usd_response.json()["rates"]["RUB"]
+                            
+                            # Считаем цену с наценкой
+                            base_price = ton_usd * usd_rub
+                            markup = float(await storage.get_cached_setting("ton_markup_percentage") or "5")
+                            final_price = base_price * (1 + markup / 100)
+                            
+                            self.last_price = final_price
+                            self.last_update = datetime.utcnow()
+                            
+                            logger.info(f"TON price updated: {final_price:.2f} RUB")
+                            return final_price
+                            
+            except Exception as e:
+                logger.error(f"Error updating TON price: {e}")
+        
+        # Возвращаем кэш или fallback
+        if self.last_price:
+            return self.last_price
+        
+        fallback = float(await storage.get_cached_setting("ton_fallback_price") or "420")
+        return fallback
+
+# Глобальный экземпляр
+ton_price_service = TONPriceService()
 
 ================================================================================
 FILE: backend\webhooks.py
@@ -3762,7 +3883,7 @@ FILE: frontend\package-lock.json
   "version": "1.0.0",
   "lockfileVersion": 3,
   "requires": true,
-  "packages": {}
+  "packages": {  }
 }
 
 
@@ -5323,7 +5444,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
 
   const prices = {
     stars: adminSettings?.stars_price ? parseFloat(adminSettings.stars_price) : 2.30,
-    ton: adminSettings?.ton_price ? parseFloat(adminSettings.ton_price) : 420.50,
+    ton: 0,
   };
 
  const quickBuyOptions = selectedCurrency === 'stars'
@@ -5762,7 +5883,7 @@ FILE: frontend\src\components\profile-tab.tsx
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient} from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useTelegram } from "@/hooks/use-telegram";
 import { useUserAvatar } from "@/hooks/use-user-avatar";
@@ -5817,13 +5938,21 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
   const userAvatar = useUserAvatar(user?.username);
   const queryClient = useQueryClient();
 
-  const { data: referralStats } = useQuery({
+  const { data: referralStats, refetch: refetchReferrals, isLoading: referralsLoading } = useQuery({
     queryKey: ['/api/referrals/stats'],
     queryFn: async () => {
+      console.log('🔍 Fetching referral stats...');
       const response = await apiRequest('GET', '/api/referrals/stats');
-      return response.json();
+      const data = await response.json();
+      console.log('🔍 Referral stats response:', data);
+      return data;
     },
+    staleTime: 0, // Отключаем кэш - данные всегда считаются устаревшими  
+    cacheTime: 0, // Данные не хранятся в кэше после unmount
+    refetchOnWindowFocus: true, // Обновляем при фокусе окна
+    refetchOnMount: true, // Обновляем при монтировании
   });
+
 
   const { data: referralConfig } = useQuery({
     queryKey: ['/api/config/referral'],
@@ -6084,7 +6213,7 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
             whileHover={{ scale: 1.02 }}
           >
             <p className="text-2xl font-bold text-[#4E7FFF]">
-              {referralStats?.totalReferrals || 0}
+              {referralStats?.total_referrals || referralStats?.totalReferrals || 0}
             </p>
             <p className="text-gray-600 dark:text-gray-400 text-sm">Рефералов</p>
           </motion.div>
@@ -13433,15 +13562,18 @@ type CurrentSettings = {
   bot_base_url?: string;
   referral_prefix?: string;
   referral_bonus_percentage?: string | number;
+  referral_registration_bonus?: string | number;
 };
 
 export default function AdminPage(): JSX.Element {
   const [starsPrice, setStarsPrice] = useState<string>("");
-  const [tonPrice, setTonPrice] = useState<string>("");
+  const [tonMarkupPercentage, setTonMarkupPercentage] = useState<string>("");
+  const [tonCacheMinutes, setTonCacheMinutes] = useState<string>("");
+  const [tonFallbackPrice, setTonFallbackPrice] = useState<string>("");
   const [botBaseUrl, setBotBaseUrl] = useState<string>("");
   const [referralPrefix, setReferralPrefix] = useState<string>("");
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
-
+  const [referralRegistrationBonus, setReferralRegistrationBonus] = useState<string>("");
   const { toast } = useToast();
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
@@ -13478,10 +13610,14 @@ export default function AdminPage(): JSX.Element {
   useEffect(() => {
     if (!currentSettings) return;
     setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
-    setTonPrice(normalizeToStringNumber(currentSettings.ton_price, "420.50"));
+    setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5"));
+  setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
+  setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420"));
+  setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
     setBotBaseUrl(currentSettings.bot_base_url || "");
     setReferralPrefix(currentSettings.referral_prefix || "");
     setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, ""));
+    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
   }, [currentSettings]);
 
   const { data: adminStats } = useQuery<AdminStats, Error>({
@@ -13534,7 +13670,7 @@ export default function AdminPage(): JSX.Element {
   });
 
   const handleUpdatePrices = () => {
-    if (!starsPrice || !tonPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage) {
+    if (!starsPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage || !tonMarkupPercentage || !referralRegistrationBonus) {
       toast({ title: "Ошибка валидации", description: "Все поля должны быть заполнены", variant: "destructive" });
       return;
     }
@@ -13542,25 +13678,30 @@ export default function AdminPage(): JSX.Element {
     const s = parseNumberOrNaN(starsPrice);
     const t = parseNumberOrNaN(tonPrice);
     const rbp = parseNumberOrNaN(referralBonusPercentage);
+    const rrb = parseNumberOrNaN(referralRegistrationBonus); // ← НОВОЕ
 
-    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(rbp)) {
+    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(rbp) || Number.isNaN(rrb)) {
       toast({ title: "Ошибка валидации", description: "Пожалуйста, введите корректные числовые значения.", variant: "destructive" });
       return;
     }
-    if (s <= 0 || t <= 0 || rbp < 0) {
+    
+    if (s <= 0 || t <= 0 || rbp < 0 || rrb < 0) {
       toast({ title: "Ошибка валидации", description: "Цены и проценты должны быть положительными числами.", variant: "destructive" });
       return;
     }
 
     const payload: Record<string, string> = {
       stars_price: String(s),
-      ton_price: String(t),
+      ton_markup_percentage: String(parseNumberOrNaN(tonMarkupPercentage)),
+      ton_price_cache_minutes: String(parseNumberOrNaN(tonCacheMinutes)), 
+      ton_fallback_price: String(parseNumberOrNaN(tonFallbackPrice)),
+      referral_registration_bonus: String(parseNumberOrNaN(referralRegistrationBonus)),
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
       referral_bonus_percentage: String(rbp),
+      referral_registration_bonus: String(rrb), // ← НОВОЕ
     };
 
-    console.log("🔥 Frontend prepared payload (string values):", payload, "stringified:", JSON.stringify(payload));
     updateSettingsMutation.mutate(payload);
   };
 
@@ -13600,90 +13741,180 @@ export default function AdminPage(): JSX.Element {
             </div>
           </motion.div>
 
-          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <h3 className="font-semibold mb-3 flex items-center"><Tag className="w-4 h-4 text-yellow-500 mr-2" />Управление ценами</h3>
-            <div className="space-y-3">
+          {/* Price Settings */}
+          <motion.div
+            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <h3 className="font-semibold mb-3 flex items-center">
+              <Tag className="w-4 h-4 text-green-500 mr-2" />
+              Цены
+            </h3>
+            <div className="space-y-4">
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за звезду (₽)</Label>
-                <Input type="text" value={starsPrice} onChange={(e) => setStarsPrice(e.target.value)} placeholder="1.50" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>Цена Stars (₽)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={starsPrice}
+                  onChange={(e) => setStarsPrice(e.target.value)}
+                  placeholder="1.50"
+                />
+              </div>
+              <Button
+                onClick={handleUpdatePrices}
+                disabled={updateSettingsMutation.isPending}
+                className="w-full"
+              >
+                {updateSettingsMutation.isPending
+                  ? "Обновляется..."
+                  : "Обновить настройки"}
+              </Button>
+            </div>
+          </motion.div>
+
+          {/* TON Dynamic Pricing */}
+          <motion.div
+            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <h3 className="font-semibold mb-3 flex items-center">
+              🚀 Динамическое ценообразование TON
+            </h3>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Label>Наценка (%)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={tonMarkupPercentage}
+                  onChange={(e) => setTonMarkupPercentage(e.target.value)}
+                  placeholder="5"
+                />
               </div>
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Цена за TON (₽)</Label>
-                <Input type="text" value={tonPrice} onChange={(e) => setTonPrice(e.target.value)} placeholder="420.50" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>Обновление (мин)</Label>
+                <Input
+                  type="number"
+                  value={tonCacheMinutes}
+                  onChange={(e) => setTonCacheMinutes(e.target.value)}
+                  placeholder="15"
+                />
+              </div>
+              <div>
+                <Label>Резервная цена (₽)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={tonFallbackPrice}
+                  onChange={(e) => setTonFallbackPrice(e.target.value)}
+                  placeholder="420"
+                />
               </div>
             </div>
           </motion.div>
 
-          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg md:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <h3 className="font-semibold mb-3 flex items-center"><Tag className="w-4 h-4 text-blue-500 mr-2" />Реферальные настройки</h3>
+          {/* Referral Settings */}
+          <motion.div
+            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+          >
+            <h3 className="font-semibold mb-3 flex items-center">
+              <Shield className="w-4 h-4 text-blue-500 mr-2" />
+              Реферальные настройки
+            </h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">URL бота</Label>
-                <Input type="text" value={botBaseUrl} onChange={(e) => setBotBaseUrl(e.target.value)} placeholder="https://t.me/bot_name" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>URL бота</Label>
+                <Input
+                  value={botBaseUrl}
+                  onChange={(e) => setBotBaseUrl(e.target.value)}
+                  placeholder="https://t.me/bot_name"
+                />
               </div>
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Префикс рефералки</Label>
-                <Input type="text" value={referralPrefix} onChange={(e) => setReferralPrefix(e.target.value)} placeholder="startapp" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>Префикс реферальных ссылок</Label>
+                <Input
+                  value={referralPrefix}
+                  onChange={(e) => setReferralPrefix(e.target.value)}
+                  placeholder="ref"
+                />
               </div>
               <div>
-                <Label className="text-sm text-gray-600 dark:text-gray-400">Процент бонуса (%)</Label>
-                <Input type="text" value={referralBonusPercentage} onChange={(e) => setReferralBonusPercentage(e.target.value)} placeholder="5" className="mt-1 bg-gray-50 dark:bg-[#0E0E10]" />
+                <Label>Процент с покупок (%)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={referralBonusPercentage}
+                  onChange={(e) => setReferralBonusPercentage(e.target.value)}
+                  placeholder="5"
+                />
               </div>
+              <div>
+                <Label>Награда за приглашение (звезды) 🎁</Label>
+                <Input
+                  type="number"
+                  value={referralRegistrationBonus}
+                  onChange={(e) => setReferralRegistrationBonus(e.target.value)}
+                  placeholder="25"
+                />
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Recent Transactions */}
+          <motion.div
+            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <h3 className="font-semibold mb-3 flex items-center">
+              <History className="w-4 h-4 text-[#4E7FFF] mr-2" />
+              Последние транзакции
+            </h3>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {adminStats?.recentTransactions?.length ? (
+                adminStats.recentTransactions.map((transaction, index) => (
+                  <div
+                    key={`${transaction.id}-${index}`}
+                    className="flex justify-between items-center p-2 bg-white dark:bg-[#1A1A1C] rounded-lg"
+                  >
+                    <div>
+                      <p className="font-medium">{transaction.username || 'Неизвестный'}</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {transaction.description || 'Транзакция'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-sm font-semibold ${
+                        transaction.status === 'completed' ? 'text-green-500' : 
+                        transaction.status === 'failed' ? 'text-red-500' : 'text-yellow-500'
+                      }`}>
+                        {transaction.status === 'completed' ? 'Завершено' : 
+                        transaction.status === 'failed' ? 'Не удалось' : 'В процессе'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {transaction.createdAt ? new Date(transaction.createdAt).toLocaleDateString() : ''}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-gray-500 text-center py-4">Нет последних транзакций</p>
+              )}
             </div>
           </motion.div>
         </div>
-
-        <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-          <Button
-            onClick={handleUpdatePrices}
-            disabled={updateSettingsMutation.isPending}
-            className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white font-semibold py-3"
-            size="lg"
-          >
-            {updateSettingsMutation.isPending ? (
-              <>
-                <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
-                Сохраняем...
-              </>
-            ) : (
-              "Сохранить настройки"
-            )}
-          </Button>
-        </motion.div>
-
-        {/* Recent Transactions */}
-        {adminStats?.recentTransactions && adminStats.recentTransactions.length > 0 && (
-          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-            <h3 className="font-semibold mb-3 flex items-center">
-              <History className="w-4 h-4 text-purple-500 mr-2" />
-              Последние транзакции
-            </h3>
-            <div className="space-y-2">
-              {adminStats.recentTransactions.slice(0, 5).map((transaction) => (
-                <div key={transaction.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-[#0E0E10] rounded-lg">
-                  <div className="flex-1">
-                    <p className="font-medium text-sm">{transaction.username || 'Неизвестный пользователь'}</p>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">{transaction.description || 'Нет описания'}</p>
-                  </div>
-                  <div className="text-right">
-                    <span className={`inline-block px-2 py-1 text-xs rounded-full ${
-                      transaction.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                      transaction.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
-                      'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                    }`}>
-                      {transaction.status === 'completed' ? 'Успешно' : 
-                       transaction.status === 'pending' ? 'В обработке' : 'Ошибка'}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
       </main>
     </div>
-  );
-}
+  );}
 
 ================================================================================
 FILE: frontend\src\pages\home.tsx

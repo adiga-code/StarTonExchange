@@ -86,13 +86,12 @@ export default function AdminPage(): JSX.Element {
     if (!currentSettings) return;
     setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
     setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5"));
-  setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
-  setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420"));
-  setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
+    setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
+    setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420"));
+    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
     setBotBaseUrl(currentSettings.bot_base_url || "");
     setReferralPrefix(currentSettings.referral_prefix || "");
     setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, ""));
-    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
   }, [currentSettings]);
 
   const { data: adminStats } = useQuery<AdminStats, Error>({
@@ -151,32 +150,34 @@ export default function AdminPage(): JSX.Element {
     }
 
     const s = parseNumberOrNaN(starsPrice);
-    const t = parseNumberOrNaN(tonPrice);
     const rbp = parseNumberOrNaN(referralBonusPercentage);
-    const rrb = parseNumberOrNaN(referralRegistrationBonus); // ← НОВОЕ
+    const tmp = parseNumberOrNaN(tonMarkupPercentage);
+    const tcm = parseNumberOrNaN(tonCacheMinutes);
+    const tfp = parseNumberOrNaN(tonFallbackPrice);
+    const rrb = parseNumberOrNaN(referralRegistrationBonus);
 
-    if (Number.isNaN(s) || Number.isNaN(t) || Number.isNaN(rbp) || Number.isNaN(rrb)) {
+    if (Number.isNaN(s) || Number.isNaN(rbp) || Number.isNaN(tmp) || Number.isNaN(tcm) || Number.isNaN(tfp) || Number.isNaN(rrb)) {
       toast({ title: "Ошибка валидации", description: "Пожалуйста, введите корректные числовые значения.", variant: "destructive" });
       return;
     }
     
-    if (s <= 0 || t <= 0 || rbp < 0 || rrb < 0) {
-      toast({ title: "Ошибка валидации", description: "Цены и проценты должны быть положительными числами.", variant: "destructive" });
+    if (s <= 0 || rbp < 0 || tmp < 0 || tcm <= 0 || tfp <= 0 || rrb < 0) {
+      toast({ title: "Ошибка валидации", description: "Все значения должны быть положительными.", variant: "destructive" });
       return;
     }
 
     const payload: Record<string, string> = {
       stars_price: String(s),
-      ton_markup_percentage: String(parseNumberOrNaN(tonMarkupPercentage)),
-      ton_price_cache_minutes: String(parseNumberOrNaN(tonCacheMinutes)), 
-      ton_fallback_price: String(parseNumberOrNaN(tonFallbackPrice)),
-      referral_registration_bonus: String(parseNumberOrNaN(referralRegistrationBonus)),
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
       referral_bonus_percentage: String(rbp),
-      referral_registration_bonus: String(rrb), // ← НОВОЕ
+      ton_markup_percentage: String(tmp),
+      ton_price_cache_minutes: String(tcm),
+      ton_fallback_price: String(tfp),
+      referral_registration_bonus: String(rrb),
     };
 
+    console.log("🔥 Frontend prepared payload:", payload);
     updateSettingsMutation.mutate(payload);
   };
 

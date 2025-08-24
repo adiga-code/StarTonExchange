@@ -832,16 +832,8 @@ async def update_admin_settings(
             await storage.update_setting("stars_price", settings.stars_price)
         else:
             logger.info(f"❌ Skipping stars_price (value: '{settings.stars_price}')")
-            
-        if settings.ton_price:
-            logger.info(f"✅ Updating ton_price to: {settings.ton_price}")
-            await storage.update_setting("ton_price", settings.ton_price)
-        else:
-            logger.info(f"❌ Skipping ton_price (value: '{settings.ton_price}')")
         if settings.stars_price:
             await storage.update_setting("stars_price", settings.stars_price)
-        if settings.ton_price:
-            await storage.update_setting("ton_price", settings.ton_price)
         # if settings.markup_percentage:
         #     await storage.update_setting("markup_percentage", settings.markup_percentage)
         if settings.bot_base_url:
@@ -853,7 +845,12 @@ async def update_admin_settings(
         if settings.referral_registration_bonus:
             await storage.update_setting("referral_registration_bonus", settings.referral_registration_bonus)
             logger.info(f"✅ Updating referral_registration_bonus to: {settings.referral_registration_bonus}")
-        
+        if settings.ton_markup_percentage:
+            await storage.update_setting("ton_markup_percentage", settings.ton_markup_percentage)
+        if settings.ton_price_cache_minutes:
+            await storage.update_setting("ton_price_cache_minutes", settings.ton_price_cache_minutes)
+        if settings.ton_fallback_price:
+            await storage.update_setting("ton_fallback_price", settings.ton_fallback_price)
         return {"success": True}
     except Exception as e:
         logger.error(f"Error updating settings: {e}")
@@ -1100,7 +1097,6 @@ async def get_admin_settings(storage: Storage = Depends(get_storage)):
         "bot_base_url": await storage.get_cached_setting("bot_base_url"),
         "referral_prefix": await storage.get_cached_setting("referral_prefix"),
         "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage"),
-        "referral_registration_bonus": await storage.get_cached_setting("referral_registration_bonus")
     }
 
 @app.get("/api/config/referral")
