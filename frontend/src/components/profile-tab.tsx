@@ -149,20 +149,23 @@ export default function ProfileTab({ user, onTabChange }: ProfileTabProps) {
     hapticFeedback('medium');
 
     const referralLink = `${referralConfig?.bot_base_url}?start=${referralConfig?.referral_prefix}${user?.referral_code}`;
+    const botUsername = referralConfig?.bot_username || '@YourBotUsername'; // Укажите username бота
     const shareText = referralConfig?.default_share_text || 'Попробуй этот крутой обменник Stars и TON!';
-    const fullMessage = `${shareText}\n\n${referralLink}`;
+    
+    // Форматируем сообщение в Markdown V2
+    const fullMessage = `${shareText}\n\n[${botUsername.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}](https://t.me/${botUsername.replace('@', '')})`;
 
     if (window.Telegram?.WebApp) {
-      // Используем openTelegramLink вместо switchInlineQuery
+      // Используем openTelegramLink с Markdown
       window.Telegram.WebApp.openTelegramLink(
-        `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(shareText)}`
+        `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(fullMessage)}`
       );
     } else {
       // Резерв для браузера
       if (navigator.share) {
         navigator.share({
           title: 'Stars Exchange',
-          text: fullMessage,
+          text: fullMessage, // В браузере Markdown не отрендерится, будет обычный текст
         }).catch(() => copyReferralLink());
       } else {
         copyReferralLink();
