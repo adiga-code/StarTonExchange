@@ -45,7 +45,6 @@ export default function AdminPage(): JSX.Element {
   const [tonMarkupPercentage, setTonMarkupPercentage] = useState<string>("");
   const [tonCacheMinutes, setTonCacheMinutes] = useState<string>("");
   const [tonFallbackPrice, setTonFallbackPrice] = useState<string>("");
-  const [referralRegistrationBonus, setReferralRegistrationBonus] = useState<string>("");
   const [botBaseUrl, setBotBaseUrl] = useState<string>("");
   const [referralPrefix, setReferralPrefix] = useState<string>("");
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
