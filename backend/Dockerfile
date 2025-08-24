@@ -12,6 +12,10 @@ COPY . .
 # Создаем директорию для базы данных
 RUN mkdir -p /app/data
 
+# Делаем start.sh исполнимым
+RUN chmod +x start.sh
+
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Запускаем через start.sh (debug_price.py + main)
+CMD ["./start.sh"]
