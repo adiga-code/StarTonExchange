@@ -15,12 +15,28 @@ import {
   TrendingUp,
   ChevronDown,
   ChevronUp,
+  Calendar,
+  Download,
+  Filter,
+  Trophy,
+  PieChart,
+  RefreshCw
 } from "@/components/ui/custom-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import { ru } from 'date-fns/locale';
 
+// Типы данных
 type AdminStats = {
   totalUsers?: number;
   todaySales?: string;
@@ -34,6 +50,28 @@ type AdminStats = {
   }>;
 };
 
+type PeriodFilter = 'today' | 'week' | 'month' | 'all' | 'custom';
+
+type ProfitStats = {
+  tonProfit: number;
+  starsProfit: number;
+  totalProfit: number;
+  marginPercentage: number;
+};
+
+type ReferralLeader = {
+  id: string;
+  username: string;
+  referralCount: number;
+  totalEarnings: number;
+};
+
+type SalesData = {
+  date: string;
+  sales: number;
+  count: number;
+};
+
 type CurrentSettings = {
   stars_price?: string | number;
   ton_markup_percentage?: string | number;
@@ -45,11 +83,8 @@ type CurrentSettings = {
   referral_registration_bonus?: string | number;
 };
 
-type TONPriceData = {
-  price: string;
-};
-
 export default function AdminPage(): JSX.Element {
+  // Существующие состояния
   const [starsPrice, setStarsPrice] = useState<string>("");
   const [tonMarkupPercentage, setTonMarkupPercentage] = useState<string>("");
   const [tonCacheMinutes, setTonCacheMinutes] = useState<string>("");
@@ -59,11 +94,47 @@ export default function AdminPage(): JSX.Element {
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
   const [referralRegistrationBonus, setReferralRegistrationBonus] = useState<string>("");
   const [showTransactions, setShowTransactions] = useState<boolean>(false);
-  
+
+  // Новые состояния для аналитики
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodFilter>('all');
+  const [customDateFrom, setCustomDateFrom] = useState<Date>();
+  const [customDateTo, setCustomDateTo] = useState<Date>();
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [transactionStatusFilter, setTransactionStatusFilter] = useState<string>('completed');
+  const [transactionCurrencyFilter, setTransactionCurrencyFilter] = useState<string>('all');
+  const [showReferralLeaders, setShowReferralLeaders] = useState(false);
+  const [conversionPeriod, setConversionPeriod] = useState<PeriodFilter>('month');
+
   const { toast } = useToast();
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
 
+  // Функции для работы с датами
+  const getPeriodDates = (period: PeriodFilter) => {
+    const now = new Date();
+    switch (period) {
+      case 'today':
+        return { from: startOfDay(now), to: endOfDay(now) };
+      case 'week':
+        return { from: startOfDay(subDays(now, 7)), to: endOfDay(now) };
+      case 'month':
+        return { from: startOfDay(subDays(now, 30)), to: endOfDay(now) };
+      case 'custom':
+        return { from: customDateFrom, to: customDateTo };
+      default:
+        return { from: null, to: null };
+    }
+  };
+
+  const periodLabels = {
+    'today': 'За сегодня',
+    'week': 'За неделю', 
+    'month': 'За месяц',
+    'all': 'За всё время',
+    'custom': 'Произвольный'
+  };
+
+  // Нормализация значений
   const normalizeToStringNumber = (value: any, fallback: string = ""): string => {
     if (value === null || value === undefined || value === "") {
       return fallback;
@@ -87,141 +158,122 @@ export default function AdminPage(): JSX.Element {
     return Number.isFinite(n) ? n : NaN;
   };
 
-  // Запрос текущих настроек
-  const { data: currentSettings } = useQuery<CurrentSettings, Error>({
-    queryKey: ["/api/admin/settings/current"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/settings/current", {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!res.ok) throw new Error(`Failed to fetch current settings: ${res.status}`);
-      return res.json();
-    },
-    staleTime: 1000 * 60 * 5,
-  });
-
-  // 🚀 Запрос цены TON
-  const { data: tonPriceData, isLoading: isTonPriceLoading } = useQuery<TONPriceData, Error>({
-    queryKey: ["/api/ton-price"],
-    queryFn: async () => {
-      const res = await fetch("/api/ton-price", {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!res.ok) throw new Error(`Failed to fetch TON price: ${res.status}`);
-      return res.json();
-    },
-    refetchInterval: 60000,
-    staleTime: 30000,
-    refetchOnWindowFocus: true,
-  });
-
-  // 🚀 Запрос реальной статистики
-  const { data: adminStats, isLoading: isStatsLoading } = useQuery<AdminStats, Error>({
+  // API запросы
+  const { data: adminStats, isLoading: isStatsLoading } = useQuery({
     queryKey: ["/api/admin/stats"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/stats", {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!res.ok) throw new Error(`Failed to fetch admin stats: ${res.status}`);
-      return res.json() as Promise<AdminStats>;
+      const response = await fetch("/api/admin/stats");
+      return response.json() as Promise<AdminStats>;
     },
-    staleTime: 1000 * 30,
-    refetchInterval: 60000, // Обновляем каждую минуту
+    refetchInterval: 30000,
   });
 
+  const { data: currentSettings, isLoading: isSettingsLoading } = useQuery({
+    queryKey: ["/api/admin/settings/current"],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/settings/current");
+      return response.json() as Promise<CurrentSettings>;
+    },
+  });
+
+  // Новые API запросы для расширенной аналитики (пока заглушки)
+  const { data: profitStats, isLoading: isProfitLoading } = useQuery({
+    queryKey: ["/api/admin/profit-stats", selectedPeriod, customDateFrom, customDateTo],
+    queryFn: async () => {
+      // TODO: Реализовать API endpoint
+      const mockData: ProfitStats = {
+        tonProfit: 125000,
+        starsProfit: 85000, 
+        totalProfit: 210000,
+        marginPercentage: 15.5
+      };
+      return mockData;
+    },
+    enabled: false // Отключено пока не реализован endpoint
+  });
+
+  const { data: referralLeaders, isLoading: isLeadersLoading } = useQuery({
+    queryKey: ["/api/admin/referral-leaders"],
+    queryFn: async () => {
+      // TODO: Реализовать API endpoint
+      const mockData: ReferralLeader[] = Array.from({ length: 10 }, (_, i) => ({
+        id: `user-${i}`,
+        username: `Пользователь ${i + 1}`,
+        referralCount: Math.floor(Math.random() * 50) + 10,
+        totalEarnings: Math.floor(Math.random() * 10000) + 1000
+      }));
+      return mockData;
+    },
+    enabled: false // Отключено пока не реализован endpoint
+  });
+
+  const { data: salesChartData, isLoading: isChartLoading } = useQuery({
+    queryKey: ["/api/admin/sales-chart", selectedPeriod],
+    queryFn: async () => {
+      // TODO: Реализовать API endpoint
+      const mockData: SalesData[] = Array.from({ length: 30 }, (_, i) => ({
+        date: format(subDays(new Date(), 29 - i), 'dd.MM'),
+        sales: Math.floor(Math.random() * 50000) + 10000,
+        count: Math.floor(Math.random() * 20) + 5
+      }));
+      return mockData;
+    },
+    enabled: false // Отключено пока не реализован endpoint
+  });
+
+  // Мутации
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (settings: Partial<CurrentSettings>) => {
+      const response = await fetch("/api/admin/settings/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+      if (!response.ok) throw new Error("Failed to update settings");
+      return response.json();
+    },
+    onSuccess: () => {
+      hapticFeedback?.notificationOccurred("success");
+      toast({ title: "Настройки обновлены", variant: "default" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
+    },
+    onError: () => {
+      hapticFeedback?.notificationOccurred("error");
+      toast({ 
+        title: "Ошибка обновления", 
+        description: "Не удалось сохранить настройки.", 
+        variant: "destructive" 
+      });
+    },
+  });
+
+  // Эффекты
   useEffect(() => {
-    if (!currentSettings) return;
-    
-    setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
-    setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5.0"));
-    setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
-    setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420.0"));
-    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25.0"));
-    
-    setBotBaseUrl(currentSettings.bot_base_url || "https://t.me/starsguru_official_bot");
-    setReferralPrefix(currentSettings.referral_prefix || "ref");
-    setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, "5.0"));
+    if (currentSettings) {
+      setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.3"));
+      setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5"));
+      setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "30"));
+      setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "400"));
+      setBotBaseUrl(String(currentSettings.bot_base_url || ""));
+      setReferralPrefix(String(currentSettings.referral_prefix || "ref"));
+      setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, "10"));
+      setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
+    }
   }, [currentSettings]);
 
-  const updateSettingsMutation = useMutation({
-    mutationFn: async (payload: Record<string, any>) => {
-      const res = await fetch("/api/admin/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      
-      const text = await res.text().catch(() => "");
-      let json;
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch {
-        json = text;
-      }
-      
-      if (!res.ok) {
-        throw new Error(`Ошибка обновления: ${res.status} ${JSON.stringify(json)}`);
-      }
-      
-      return json;
-    },
-    onSuccess: (data) => {
-      hapticFeedback("success");
-      
-      let description = "Настройки успешно обновлены";
-      if (data?.ton_price_updated && data?.new_ton_price) {
-        description = `Настройки обновлены. Новая цена TON: ₽${data.new_ton_price}`;
-      }
-      
-      toast({ 
-        title: "Настройки обновлены", 
-        description: description
-      });
-      
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-      
-      if (data?.ton_price_updated) {
-        queryClient.invalidateQueries({ queryKey: ["/api/ton-price"] });
-      }
-    },
-    onError: (err: any) => {
-      hapticFeedback("error");
-      toast({ 
-        title: "Ошибка", 
-        description: `Не удалось обновить настройки: ${err.message}`, 
-        variant: "destructive" 
-      });
-    },
-  });
-
-  const handleUpdatePrices = () => {
-    if (!starsPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage || 
-        !tonMarkupPercentage || !referralRegistrationBonus || 
-        !tonCacheMinutes || !tonFallbackPrice) {
-      toast({ 
-        title: "Ошибка валидации", 
-        description: "Все поля должны быть заполнены", 
-        variant: "destructive" 
-      });
-      return;
-    }
-
+  // Обработчики
+  const handleUpdateSettings = () => {
     const s = parseNumberOrNaN(starsPrice);
-    const rbp = parseNumberOrNaN(referralBonusPercentage);
     const tmp = parseNumberOrNaN(tonMarkupPercentage);
     const tcm = parseNumberOrNaN(tonCacheMinutes);
     const tfp = parseNumberOrNaN(tonFallbackPrice);
+    const rbp = parseNumberOrNaN(referralBonusPercentage);
     const rrb = parseNumberOrNaN(referralRegistrationBonus);
 
-    if (Number.isNaN(s) || Number.isNaN(rbp) || Number.isNaN(tmp) || 
-        Number.isNaN(tcm) || Number.isNaN(tfp) || Number.isNaN(rrb)) {
+    if (isNaN(s) || isNaN(tmp) || isNaN(tcm) || isNaN(tfp) || isNaN(rbp) || isNaN(rrb)) {
       toast({ 
         title: "Ошибка валидации", 
-        description: "Пожалуйста, введите корректные числовые значения.", 
+        description: "Все числовые поля должны содержать корректные значения.", 
         variant: "destructive" 
       });
       return;
@@ -248,6 +300,24 @@ export default function AdminPage(): JSX.Element {
     });
   };
 
+  const handleExport = (format: 'csv' | 'excel' | 'pdf') => {
+    // TODO: Реализовать экспорт
+    toast({ 
+      title: `Экспорт ${format.toUpperCase()}`, 
+      description: "Функция экспорта будет доступна скоро" 
+    });
+  };
+
+  const refreshProfitStats = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/profit-stats"] });
+    toast({ title: "Статистика прибыли обновлена" });
+  };
+
+  // Вычисляемые значения
+  const conversionRate = adminStats?.totalUsers && adminStats.todaySales 
+    ? ((parseFloat(adminStats.todaySales) > 0 ? 1 : 0) / adminStats.totalUsers * 100).toFixed(1)
+    : "0.0";
+
   return (
     <div className="min-h-screen bg-white dark:bg-[#0E0E10] text-gray-900 dark:text-white">
       <header className="sticky top-0 z-50 bg-white/80 dark:bg-[#0E0E10]/80 backdrop-blur-lg border-b border-gray-200 dark:border-white/10">
@@ -260,13 +330,96 @@ export default function AdminPage(): JSX.Element {
           <h1 className="text-lg font-bold flex items-center">
             <Shield className="w-5 h-5 text-[#4E7FFF] mr-2" /> Админ панель
           </h1>
-          <div style={{ width: 36 }} />
+          
+          {/* Кнопка экспорта */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <Download className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('csv')}>
+                Экспорт CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('excel')}>
+                Экспорт Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                Экспорт PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
       <main className="p-4 space-y-6">
-        {/* 🚀 УЛУЧШЕННАЯ СТАТИСТИКА */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Выбор периода */}
+        <motion.div 
+          className="bg-gray-50 dark:bg-[#1A1A1C] rounded-xl p-4"
+          initial={{ opacity: 0, y: 20 }} 
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="flex flex-wrap gap-4 items-center">
+            <div className="flex items-center space-x-2">
+              <Calendar className="w-4 h-4 text-[#4E7FFF]" />
+              <Label className="text-sm font-medium">Период:</Label>
+            </div>
+            
+            <Select value={selectedPeriod} onValueChange={(value: PeriodFilter) => setSelectedPeriod(value)}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Выберите период" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(periodLabels).map(([key, label]) => (
+                  <SelectItem key={key} value={key}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {selectedPeriod === 'custom' && (
+              <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="text-sm">
+                    {customDateFrom && customDateTo ? 
+                      `${format(customDateFrom, 'dd.MM.yyyy')} - ${format(customDateTo, 'dd.MM.yyyy')}` : 
+                      'Выберите даты'
+                    }
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <div className="p-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-xs text-gray-500">От</Label>
+                        <CalendarComponent
+                          mode="single"
+                          selected={customDateFrom}
+                          onSelect={setCustomDateFrom}
+                          locale={ru}
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-gray-500">До</Label>
+                        <CalendarComponent
+                          mode="single"
+                          selected={customDateTo}
+                          onSelect={setCustomDateTo}
+                          locale={ru}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+          </div>
+        </motion.div>
+
+        {/* Основная статистика */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <motion.div 
             className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl p-4 border border-blue-200 dark:border-blue-700"
             initial={{ opacity: 0, y: 20 }} 
@@ -294,9 +447,12 @@ export default function AdminPage(): JSX.Element {
               <TrendingUp className="w-5 h-5 text-green-400" />
             </div>
             <h3 className="text-2xl font-bold text-green-600 dark:text-green-400">
-              ₽{adminStats?.todaySales ? parseFloat(adminStats.todaySales).toLocaleString() : '0'}
+              ₽{adminStats?.todaySales ? 
+                parseFloat(adminStats.todaySales).toLocaleString("ru-RU", { maximumFractionDigits: 0 }) : 
+                "0"
+              }
             </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400">Продаж сегодня</p>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Продаж за сегодня</p>
           </motion.div>
 
           <motion.div 
@@ -306,111 +462,237 @@ export default function AdminPage(): JSX.Element {
             transition={{ delay: 0.2 }}
           >
             <div className="flex items-center justify-between mb-2">
-              <Activity className="w-8 h-8 text-purple-500" />
+              <Users className="w-8 h-8 text-purple-500" />
             </div>
             <h3 className="text-2xl font-bold text-purple-600 dark:text-purple-400">
               {adminStats?.activeReferrals || 0}
             </h3>
             <p className="text-sm text-gray-600 dark:text-gray-400">Активных рефералов</p>
           </motion.div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Price Settings */}
-          <motion.div
-            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
-            initial={{ opacity: 0, y: 20 }}
+          <motion.div 
+            className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-xl p-4 border border-orange-200 dark:border-orange-700"
+            initial={{ opacity: 0, y: 20 }} 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
           >
-            <h3 className="font-semibold mb-3 flex items-center">
-              <Tag className="w-4 h-4 text-green-500 mr-2" />
-              Цены
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <Label>Цена Stars (₽)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={starsPrice}
-                  onChange={(e) => setStarsPrice(e.target.value)}
-                  placeholder="1.50"
-                />
-              </div>
-              <Button
-                onClick={handleUpdatePrices}
-                disabled={updateSettingsMutation.isPending}
-                className="w-full"
-              >
-                {updateSettingsMutation.isPending
-                  ? "Обновляется..."
-                  : "Обновить настройки"}
-              </Button>
+            <div className="flex items-center justify-between mb-2">
+              <PieChart className="w-8 h-8 text-orange-500" />
             </div>
-          </motion.div>
-
-          {/* TON Dynamic Pricing */}
-          <motion.div
-            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-          >
-            <h3 className="font-semibold mb-3 flex items-center">
-              🚀 TON ценообразование
-              {updateSettingsMutation.isPending && (
-                <div className="ml-2 animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
-              )}
+            <h3 className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+              {conversionRate}%
             </h3>
-            
-            {/* Текущая цена TON */}
-            {tonPriceData?.price && (
-              <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium">Текущая цена:</span>
-                  <span className="font-bold text-lg text-blue-600">
-                    {isTonPriceLoading ? (
-                      <span className="animate-pulse">Обновляется...</span>
-                    ) : (
-                      `₽${parseFloat(tonPriceData.price).toFixed(2)}`
-                    )}
-                  </span>
-                </div>
-              </div>
-            )}
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Наценка (%)</Label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={tonMarkupPercentage}
-                  onChange={(e) => setTonMarkupPercentage(e.target.value)}
-                  placeholder="5"
-                />
-              </div>
-              <div>
-                <Label>Резервная цена (₽)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={tonFallbackPrice}
-                  onChange={(e) => setTonFallbackPrice(e.target.value)}
-                  placeholder="420"
-                />
-              </div>
-            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Конверсия (месяц)</p>
           </motion.div>
         </div>
 
-        {/* Referral Settings */}
+        {/* Статистика прибыли */}
         <motion.div
-          className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
+          className="bg-gray-50 dark:bg-[#1A1A1C] rounded-xl p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold flex items-center">
+              <BarChart3 className="w-5 h-5 text-green-500 mr-2" />
+              Статистика прибыли {periodLabels[selectedPeriod].toLowerCase()}
+            </h3>
+            <Button variant="ghost" size="sm" onClick={refreshProfitStats}>
+              <RefreshCw className="w-4 h-4" />
+            </Button>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-[#0E0E10] rounded-lg p-3">
+              <p className="text-sm text-gray-600 dark:text-gray-400">TON прибыль</p>
+              <p className="text-xl font-bold text-blue-600">₽{profitStats?.tonProfit.toLocaleString() || "0"}</p>
+            </div>
+            <div className="bg-white dark:bg-[#0E0E10] rounded-lg p-3">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Stars прибыль</p>
+              <p className="text-xl font-bold text-yellow-600">₽{profitStats?.starsProfit.toLocaleString() || "0"}</p>
+            </div>
+            <div className="bg-white dark:bg-[#0E0E10] rounded-lg p-3">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Общая прибыль</p>
+              <p className="text-xl font-bold text-green-600">₽{profitStats?.totalProfit.toLocaleString() || "0"}</p>
+            </div>
+            <div className="bg-white dark:bg-[#0E0E10] rounded-lg p-3">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Маржинальность</p>
+              <p className="text-xl font-bold text-purple-600">{profitStats?.marginPercentage || "0"}%</p>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* График продаж */}
+        <motion.div
+          className="bg-gray-50 dark:bg-[#1A1A1C] rounded-xl p-4"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
+        >
+          <h3 className="font-semibold mb-4 flex items-center">
+            <Activity className="w-5 h-5 text-blue-500 mr-2" />
+            График продаж (последние 30 дней)
+          </h3>
+          
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={salesChartData || []}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip 
+                  formatter={(value, name) => [
+                    `₽${Number(value).toLocaleString()}`,
+                    name === 'sales' ? 'Продажи' : 'Количество'
+                  ]}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="sales" 
+                  stroke="#4E7FFF" 
+                  fill="#4E7FFF" 
+                  fillOpacity={0.3}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </motion.div>
+
+        {/* Лидеры рефералов */}
+        <motion.div
+          className="bg-gray-50 dark:bg-[#1A1A1C] rounded-xl p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold flex items-center">
+              <Trophy className="w-5 h-5 text-yellow-500 mr-2" />
+              Топ-10 рефералов
+            </h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowReferralLeaders(!showReferralLeaders)}
+            >
+              {showReferralLeaders ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </Button>
+          </div>
+
+          <AnimatePresence>
+            {showReferralLeaders && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-2">
+                  {referralLeaders?.map((leader, index) => (
+                    <div key={leader.id} className="flex items-center justify-between bg-white dark:bg-[#0E0E10] rounded-lg p-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                          {index + 1}
+                        </div>
+                        <div>
+                          <p className="font-medium">{leader.username}</p>
+                          <p className="text-sm text-gray-500">{leader.referralCount} рефералов</p>
+                        </div>
+                      </div>
+                      <Badge variant="secondary">
+                        {leader.totalEarnings.toLocaleString()} ⭐
+                      </Badge>
+                    </div>
+                  )) || Array.from({ length: 10 }, (_, i) => (
+                    <div key={i} className="flex items-center justify-between bg-white dark:bg-[#0E0E10] rounded-lg p-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse"></div>
+                        <div>
+                          <div className="h-4 bg-gray-200 rounded w-24 animate-pulse mb-1"></div>
+                          <div className="h-3 bg-gray-200 rounded w-16 animate-pulse"></div>
+                        </div>
+                      </div>
+                      <div className="h-6 bg-gray-200 rounded w-20 animate-pulse"></div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+
+        {/* Настройки цен */}
+        <motion.div
+          className="bg-gray-50 dark:bg-[#1A1A1C] rounded-xl p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.7 }}
+        >
+          <h3 className="font-semibold mb-3 flex items-center">
+            <Tag className="w-4 h-4 text-orange-500 mr-2" />
+            Настройки цен
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label>Цена Stars (₽)</Label>
+              <Input
+                value={starsPrice}
+                onChange={(e) => setStarsPrice(e.target.value)}
+                placeholder="1.3"
+              />
+            </div>
+            <div>
+              <Label>Наценка TON (%)</Label>
+              <Input
+                value={tonMarkupPercentage}
+                onChange={(e) => setTonMarkupPercentage(e.target.value)}
+                placeholder="5"
+              />
+            </div>
+            <div>
+              <Label>Кэш TON (минуты)</Label>
+              <Input
+                value={tonCacheMinutes}
+                onChange={(e) => setTonCacheMinutes(e.target.value)}
+                placeholder="30"
+              />
+            </div>
+            <div>
+              <Label>Резервная цена TON (₽)</Label>
+              <Input
+                value={tonFallbackPrice}
+                onChange={(e) => setTonFallbackPrice(e.target.value)}
+                placeholder="400"
+              />
+            </div>
+            <div>
+              <Label>Бонус за регистрацию (⭐)</Label>
+              <Input
+                value={referralRegistrationBonus}
+                onChange={(e) => setReferralRegistrationBonus(e.target.value)}
+                placeholder="25"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button 
+                onClick={handleUpdateSettings} 
+                className="w-full"
+                disabled={updateSettingsMutation.isPending}
+              >
+                {updateSettingsMutation.isPending ? "Обновляется..." : "Обновить цены"}
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Реферальные настройки */}
+        <motion.div
+          className="bg-gray-50 dark:bg-[#1A1A1C] rounded-xl p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.8 }}
         >
           <h3 className="font-semibold mb-3 flex items-center">
             <Shield className="w-4 h-4 text-blue-500 mr-2" />
@@ -433,94 +715,115 @@ export default function AdminPage(): JSX.Element {
                 placeholder="ref"
               />
             </div>
-            <div>
-              <Label>Процент с покупок (%)</Label>
+            <div className="col-span-2">
+              <Label>Процент реферального бонуса (%)</Label>
               <Input
                 type="number"
-                step="0.1"
                 value={referralBonusPercentage}
                 onChange={(e) => setReferralBonusPercentage(e.target.value)}
-                placeholder="5"
-              />
-            </div>
-            <div>
-              <Label>Награда за приглашение 🎁</Label>
-              <Input
-                type="number"
-                value={referralRegistrationBonus}
-                onChange={(e) => setReferralRegistrationBonus(e.target.value)}
-                placeholder="25"
+                placeholder="10"
               />
             </div>
           </div>
         </motion.div>
 
-        {/* 🚀 УЛУЧШЕННЫЕ ТРАНЗАКЦИИ */}
+        {/* Фильтрованные транзакции */}
         <motion.div
-          className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
+          className="bg-gray-50 dark:bg-[#1A1A1C] rounded-xl p-4"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
+          transition={{ delay: 0.9 }}
         >
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold flex items-center">
               <History className="w-4 h-4 text-[#4E7FFF] mr-2" />
               Последние транзакции
             </h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowTransactions(!showTransactions)}
-              className="flex items-center gap-1"
-            >
-              {showTransactions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              {showTransactions ? 'Свернуть' : 'Развернуть'}
-            </Button>
+            <div className="flex items-center space-x-2">
+              <Select value={transactionStatusFilter} onValueChange={setTransactionStatusFilter}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="completed">Завершено</SelectItem>
+                  <SelectItem value="pending">Ожидание</SelectItem>
+                  <SelectItem value="failed">Ошибка</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              <Select value={transactionCurrencyFilter} onValueChange={setTransactionCurrencyFilter}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все валюты</SelectItem>
+                  <SelectItem value="stars">Stars</SelectItem>
+                  <SelectItem value="ton">TON</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowTransactions(!showTransactions)}
+              >
+                {showTransactions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </Button>
+            </div>
           </div>
-          
+
           <AnimatePresence>
-            <motion.div 
-              className="space-y-2 max-h-80 overflow-y-auto"
-              initial={false}
-              animate={{ height: showTransactions ? 'auto' : '200px' }}
-              transition={{ duration: 0.3 }}
-            >
-              {adminStats?.recentTransactions?.length ? (
-                adminStats.recentTransactions
-                  .slice(0, showTransactions ? adminStats.recentTransactions.length : 3)
-                  .map((transaction, index) => (
-                    <motion.div
-                      key={`${transaction.id}-${index}`}
-                      className="flex justify-between items-center p-3 bg-white dark:bg-[#1A1A1C] rounded-lg border border-gray-200 dark:border-white/10"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                    >
-                      <div className="flex-1">
-                        <p className="font-medium text-sm">{transaction.username}</p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400">
-                          {transaction.description}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                          transaction.status === 'completed' ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 
-                          transaction.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400' : 
-                          'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400'
-                        }`}>
-                          {transaction.status === 'completed' ? '✓' : 
-                          transaction.status === 'failed' ? '✗' : '⏳'}
-                        </span>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {transaction.createdAt ? new Date(transaction.createdAt).toLocaleDateString('ru') : ''}
-                        </p>
-                      </div>
-                    </motion.div>
-                  ))
-              ) : (
-                <p className="text-gray-500 text-center py-8">Нет транзакций</p>
-              )}
-            </motion.div>
+            {showTransactions && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {adminStats?.recentTransactions?.length ? 
+                    adminStats.recentTransactions
+                      .filter(tx => 
+                        (transactionStatusFilter === 'all' || tx.status === transactionStatusFilter) &&
+                        (transactionCurrencyFilter === 'all' || tx.description?.toLowerCase().includes(transactionCurrencyFilter))
+                      )
+                      .slice(0, 20)
+                      .map((transaction, index) => (
+                      <motion.div
+                        key={transaction.id}
+                        className="flex items-center justify-between bg-white dark:bg-[#0E0E10] rounded-lg p-3"
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.1 }}
+                      >
+                        <div>
+                          <p className="font-medium text-sm">{transaction.username}</p>
+                          <p className="text-xs text-gray-500">{transaction.description}</p>
+                          {transaction.createdAt && (
+                            <p className="text-xs text-gray-400">
+                              {new Date(transaction.createdAt).toLocaleDateString('ru-RU')}
+                            </p>
+                          )}
+                        </div>
+                        <Badge 
+                          variant={transaction.status === 'completed' ? 'default' : 
+                                   transaction.status === 'failed' ? 'destructive' : 'secondary'}
+                        >
+                          {transaction.status === 'completed' ? 'Завершено' :
+                           transaction.status === 'failed' ? 'Ошибка' :
+                           transaction.status === 'pending' ? 'Ожидание' : 
+                           transaction.status}
+                        </Badge>
+                      </motion.div>
+                    )) : (
+                      <p className="text-center text-gray-500 py-8">Транзакций нет</p>
+                    )
+                  }
+                </div>
+              </motion.div>
+            )}
           </AnimatePresence>
         </motion.div>
       </main>
