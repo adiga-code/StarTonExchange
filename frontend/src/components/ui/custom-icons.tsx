@@ -35,6 +35,12 @@ import {
   ChevronUp, 
   Target, 
   Gift,
+  Calendar,
+  Download,
+  Filter,
+  Trophy,
+  PieChart,
+  RefreshCw
 } from "lucide-react";
 
 // Конфигурация кастомных иконок с более надежными источниками
@@ -192,6 +198,11 @@ export {
   ArrowLeft,
   Bell, 
   Palette,Receipt,
-  ChevronDown, ChevronUp, Target, Gift
-
+  ChevronDown, ChevronUp, Target, Gift,
+  Calendar,
+  Download,
+  Filter,
+  Trophy,
+  PieChart,
+  RefreshCw
 };
