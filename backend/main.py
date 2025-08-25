@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timedelta
+from sqlalchemy import func, and_, select
 from typing import Optional, List
 import asyncio
 import os
@@ -700,9 +702,7 @@ async def robokassa_webhook(
         if not invoice_id:
             raise HTTPException(status_code=400, detail="Missing InvId")
         
-        # Find transaction by invoice_id
-        from sqlalchemy import select
-        from models import Transaction
+    
         
         result = await storage.db.execute(
             select(Transaction).where(Transaction.invoice_id == invoice_id)
@@ -804,21 +804,24 @@ async def get_payment_status(
 @app.get("/api/admin/stats")
 async def get_admin_stats(storage: Storage = Depends(get_storage)):
     try:
-        from datetime import datetime, timedelta
-        from sqlalchemy import func, and_, select
+        logger.info("🚀 Starting admin stats collection...")
         
         # Сегодняшняя дата
         today = datetime.utcnow().date()
         today_start = datetime.combine(today, datetime.min.time())
         today_end = datetime.combine(today, datetime.max.time())
+        logger.info(f"📅 Date range: {today_start} to {today_end}")
         
         # 1. Всего пользователей
+        logger.info("👥 Getting total users...")
         total_users_result = await storage.db.execute(
             select(func.count(User.id))
         )
         total_users = total_users_result.scalar() or 0
+        logger.info(f"👥 Total users: {total_users}")
         
-        # 2. Продаж сегодня (только completed)
+        # 2. Продажи за сегодня
+        logger.info("💰 Getting today sales...")
         today_sales_result = await storage.db.execute(
             select(func.coalesce(func.sum(Transaction.rub_amount), 0))
             .where(and_(
@@ -829,15 +832,19 @@ async def get_admin_stats(storage: Storage = Depends(get_storage)):
             ))
         )
         today_sales = float(today_sales_result.scalar() or 0)
+        logger.info(f"💰 Today sales: {today_sales}")
         
-        # 3. Активные рефералы (у кого есть приглашенные)
+        # 3. Активные рефералы
+        logger.info("🔗 Getting active referrals...")
         active_referrals_result = await storage.db.execute(
             select(func.count(func.distinct(User.referred_by)))
             .where(User.referred_by.isnot(None))
         )
         active_referrals = active_referrals_result.scalar() or 0
+        logger.info(f"🔗 Active referrals: {active_referrals}")
         
-        # 4. Последние 10 транзакций
+        # 4. Последние транзакции
+        logger.info("📋 Getting recent transactions...")
         recent_transactions_result = await storage.db.execute(
             select(Transaction, User.username)
             .join(User, Transaction.user_id == User.id)
@@ -848,7 +855,6 @@ async def get_admin_stats(storage: Storage = Depends(get_storage)):
         
         recent_transactions = []
         for transaction, username in recent_transactions_result.all():
-            # Простое описание
             if transaction.type == "buy_stars":
                 desc = f"Купил {int(transaction.amount)} звезд за ₽{transaction.rub_amount}"
             elif transaction.type == "buy_ton":
@@ -866,16 +872,36 @@ async def get_admin_stats(storage: Storage = Depends(get_storage)):
                 "createdAt": transaction.created_at.isoformat()
             })
         
-        return {
+        logger.info(f"📋 Found {len(recent_transactions)} recent transactions")
+        
+        result = {
             "totalUsers": total_users,
             "todaySales": f"{today_sales:.0f}",
             "activeReferrals": active_referrals,
             "recentTransactions": recent_transactions
         }
         
+        logger.info(f"✅ Admin stats result: {result}")
+        return result
+        
     except Exception as e:
-        logger.error(f"Error getting admin stats: {e}", exc_info=True)
-        # Возвращаем пустые данные при ошибке
+        logger.error(f"❌ Error getting admin stats: {e}", exc_info=True)
+        # Более детальная информация об ошибке
+        error_details = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "total_users_fallback": 0,
+            "today_sales_fallback": "0",
+            "active_referrals_fallback": 0,
+            "recent_transactions_fallback": []
+        }
+        logger.error(f"❌ Error details: {error_details}")
+        
+        # В development режиме возвращаем детали ошибки
+        if os.getenv("ENVIRONMENT") == "development":
+            return error_details
+        
+        # В production возвращаем безопасные fallback значения
         return {
             "totalUsers": 0,
             "todaySales": "0",
