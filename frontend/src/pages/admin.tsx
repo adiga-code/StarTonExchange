@@ -112,6 +112,91 @@ export default function AdminPage(): JSX.Element {
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
 
+  // Функция для безопасного вызова haptic feedback
+  const triggerHaptic = (type: 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'error') => {
+    try {
+      if (hapticFeedback) {
+        switch (type) {
+          case 'light':
+            hapticFeedback('light');
+            break;
+          case 'medium':
+            hapticFeedback('medium');
+            break;
+          case 'heavy':
+            hapticFeedback('heavy');
+            break;
+          case 'success':
+            hapticFeedback('success');
+            break;
+          case 'warning':
+            hapticFeedback('warning');
+            break;
+          case 'error':
+            hapticFeedback('error');
+            break;
+        }
+      }
+    } catch (error) {
+      console.log('Haptic feedback not available:', error);
+    }
+  };
+
+  // Функция для воспроизведения звуков
+  const playSound = (type: 'click' | 'success' | 'error' | 'input') => {
+    try {
+      // Создаем AudioContext для генерации простых звуков
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      switch (type) {
+        case 'click':
+          oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+          gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+          break;
+        case 'success':
+          oscillator.frequency.setValueAtTime(1000, audioContext.currentTime);
+          oscillator.frequency.setValueAtTime(1200, audioContext.currentTime + 0.1);
+          gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+          break;
+        case 'error':
+          oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
+          gainNode.gain.setValueAtTime(0.15, audioContext.currentTime);
+          break;
+        case 'input':
+          oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+          gainNode.gain.setValueAtTime(0.05, audioContext.currentTime);
+          break;
+      }
+      
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.1);
+      
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+    } catch (error) {
+      console.log('Audio not available:', error);
+    }
+  };
+
+  // Функция для системных уведомлений
+  const showNotification = (title: string, options?: NotificationOptions) => {
+    try {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, {
+          icon: '/favicon.ico',
+          badge: '/favicon.ico',
+          ...options
+        });
+      }
+    } catch (error) {
+      console.log('Notifications not available:', error);
+    }
+  };
+
   // Функции для работы с датами
   const getPeriodDates = (period: PeriodFilter) => {
     const now = new Date();
@@ -228,8 +313,8 @@ export default function AdminPage(): JSX.Element {
   // Мутации
   const updateSettingsMutation = useMutation({
     mutationFn: async (settings: Partial<CurrentSettings>) => {
-      const response = await fetch("/api/admin/settings", {
-        method: "PUT",
+      const response = await fetch("/api/admin/settings/update", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
       });
@@ -253,6 +338,20 @@ export default function AdminPage(): JSX.Element {
 
   // Эффекты
   useEffect(() => {
+    // Запрос разрешения на уведомления
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          showNotification('🔔 Уведомления включены', {
+            body: 'Теперь вы будете получать уведомления об изменениях',
+            tag: 'notifications-enabled'
+          });
+        }
+      });
+    }
+  }, []);
+
+  useEffect(() => {
     if (currentSettings) {
       setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.3"));
       setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5"));
@@ -267,6 +366,8 @@ export default function AdminPage(): JSX.Element {
 
   // Обработчики
   const handleUpdateSettings = () => {
+    triggerHaptic('medium');
+    
     const s = parseNumberOrNaN(starsPrice);
     const tmp = parseNumberOrNaN(tonMarkupPercentage);
     const tcm = parseNumberOrNaN(tonCacheMinutes);
@@ -275,6 +376,7 @@ export default function AdminPage(): JSX.Element {
     const rrb = parseNumberOrNaN(referralRegistrationBonus);
 
     if (isNaN(s) || isNaN(tmp) || isNaN(tcm) || isNaN(tfp) || isNaN(rbp) || isNaN(rrb)) {
+      triggerHaptic('error');
       toast({ 
         title: "Ошибка валидации", 
         description: "Все числовые поля должны содержать корректные значения.", 
@@ -284,6 +386,7 @@ export default function AdminPage(): JSX.Element {
     }
     
     if (s <= 0 || rbp < 0 || tmp < 0 || tcm <= 0 || tfp <= 0 || rrb < 0) {
+      triggerHaptic('error');
       toast({ 
         title: "Ошибка валидации", 
         description: "Все значения должны быть положительными.", 
@@ -305,6 +408,7 @@ export default function AdminPage(): JSX.Element {
   };
 
   const handleExport = (format: 'csv' | 'excel' | 'pdf') => {
+    triggerHaptic('light');
     // TODO: Реализовать экспорт
     toast({ 
       title: `Экспорт ${format.toUpperCase()}`, 
@@ -313,6 +417,8 @@ export default function AdminPage(): JSX.Element {
   };
 
   const refreshProfitStats = async () => {
+    triggerHaptic('medium');
+    playSound('click');
     try {
       const response = await fetch("/api/admin/profit-stats/refresh", {
         method: "POST",
@@ -321,17 +427,75 @@ export default function AdminPage(): JSX.Element {
       
       if (response.ok) {
         queryClient.invalidateQueries({ queryKey: ["/api/admin/profit-stats"] });
+        triggerHaptic('success');
+        playSound('success');
+        showNotification('📊 Статистика обновлена', {
+          body: 'Данные по прибыли успешно обновлены',
+          tag: 'stats-refresh'
+        });
         toast({ title: "Статистика прибыли обновлена" });
       } else {
         throw new Error('Failed to refresh');
       }
     } catch (error) {
+      triggerHaptic('error');
+      playSound('error');
+      showNotification('❌ Ошибка обновления', {
+        body: 'Не удалось обновить статистику прибыли',
+        tag: 'stats-error'
+      });
       toast({ 
         title: "Ошибка обновления", 
         description: "Не удалось обновить статистику",
         variant: "destructive" 
       });
     }
+  };
+
+  // Обработчики для UI элементов
+  const handlePeriodChange = (value: PeriodFilter) => {
+    triggerHaptic('light');
+    playSound('click');
+    setSelectedPeriod(value);
+  };
+
+  const handleDatePickerToggle = (open: boolean) => {
+    if (open) {
+      triggerHaptic('light');
+      playSound('click');
+    }
+    setShowDatePicker(open);
+  };
+
+  const handleTransactionStatusFilterChange = (value: string) => {
+    triggerHaptic('light');
+    playSound('click');
+    setTransactionStatusFilter(value);
+  };
+
+  const handleTransactionCurrencyFilterChange = (value: string) => {
+    triggerHaptic('light');
+    playSound('click');
+    setTransactionCurrencyFilter(value);
+  };
+
+  const handleToggleReferralLeaders = () => {
+    triggerHaptic('medium');
+    playSound('click');
+    setShowReferralLeaders(!showReferralLeaders);
+  };
+
+  const handleToggleTransactions = () => {
+    triggerHaptic('medium');
+    playSound('click');
+    setShowTransactions(!showTransactions);
+  };
+
+  // Обработчик для input полей
+  const handleInputChange = (setter: (value: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    triggerHaptic('light');
+    playSound('input');
+    setter(e.target.value);
   };
 
   // Вычисляемые значения
@@ -344,7 +508,12 @@ export default function AdminPage(): JSX.Element {
       <header className="sticky top-0 z-50 bg-white/80 dark:bg-[#0E0E10]/80 backdrop-blur-lg border-b border-gray-200 dark:border-white/10">
         <div className="flex items-center justify-between p-4">
           <Link href="/">
-            <Button variant="ghost" size="icon" aria-label="Back">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              aria-label="Back"
+              onClick={() => triggerHaptic('light')}
+            >
               <ArrowLeft className="w-4 h-4" />
             </Button>
           </Link>
@@ -355,7 +524,11 @@ export default function AdminPage(): JSX.Element {
           {/* Кнопка экспорта */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => triggerHaptic('light')}
+              >
                 <Download className="w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -387,7 +560,7 @@ export default function AdminPage(): JSX.Element {
               <Label className="text-sm font-medium">Период:</Label>
             </div>
             
-            <Select value={selectedPeriod} onValueChange={(value: PeriodFilter) => setSelectedPeriod(value)}>
+            <Select value={selectedPeriod} onValueChange={handlePeriodChange}>
               <SelectTrigger className="w-40">
                 <SelectValue placeholder="Выберите период" />
               </SelectTrigger>
@@ -399,7 +572,7 @@ export default function AdminPage(): JSX.Element {
             </Select>
 
             {selectedPeriod === 'custom' && (
-              <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
+              <Popover open={showDatePicker} onOpenChange={handleDatePickerToggle}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="text-sm">
                     {customDateFrom && customDateTo ? 
@@ -416,7 +589,11 @@ export default function AdminPage(): JSX.Element {
                         <CalendarComponent
                           mode="single"
                           selected={customDateFrom}
-                          onSelect={setCustomDateFrom}
+                          onSelect={(date) => {
+                            triggerHaptic('light');
+                            playSound('click');
+                            setCustomDateFrom(date);
+                          }}
                           locale={ru}
                           className="w-full"
                         />
@@ -426,7 +603,11 @@ export default function AdminPage(): JSX.Element {
                         <CalendarComponent
                           mode="single"
                           selected={customDateTo}
-                          onSelect={setCustomDateTo}
+                          onSelect={(date) => {
+                            triggerHaptic('light');
+                            playSound('click');
+                            setCustomDateTo(date);
+                          }}
                           locale={ru}
                           className="w-full"
                         />
@@ -619,7 +800,7 @@ export default function AdminPage(): JSX.Element {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setShowReferralLeaders(!showReferralLeaders)}
+              onClick={handleToggleReferralLeaders}
             >
               {showReferralLeaders ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </Button>
@@ -704,7 +885,7 @@ export default function AdminPage(): JSX.Element {
               <Label>Цена Stars (₽)</Label>
               <Input
                 value={starsPrice}
-                onChange={(e) => setStarsPrice(e.target.value)}
+                onChange={handleInputChange(setStarsPrice)}
                 placeholder="1.3"
               />
             </div>
@@ -712,7 +893,7 @@ export default function AdminPage(): JSX.Element {
               <Label>Наценка TON (%)</Label>
               <Input
                 value={tonMarkupPercentage}
-                onChange={(e) => setTonMarkupPercentage(e.target.value)}
+                onChange={handleInputChange(setTonMarkupPercentage)}
                 placeholder="5"
               />
             </div>
@@ -720,7 +901,7 @@ export default function AdminPage(): JSX.Element {
               <Label>Кэш TON (минуты)</Label>
               <Input
                 value={tonCacheMinutes}
-                onChange={(e) => setTonCacheMinutes(e.target.value)}
+                onChange={handleInputChange(setTonCacheMinutes)}
                 placeholder="30"
               />
             </div>
@@ -728,7 +909,7 @@ export default function AdminPage(): JSX.Element {
               <Label>Резервная цена TON (₽)</Label>
               <Input
                 value={tonFallbackPrice}
-                onChange={(e) => setTonFallbackPrice(e.target.value)}
+                onChange={handleInputChange(setTonFallbackPrice)}
                 placeholder="400"
               />
             </div>
@@ -736,7 +917,7 @@ export default function AdminPage(): JSX.Element {
               <Label>Бонус за регистрацию (⭐)</Label>
               <Input
                 value={referralRegistrationBonus}
-                onChange={(e) => setReferralRegistrationBonus(e.target.value)}
+                onChange={handleInputChange(setReferralRegistrationBonus)}
                 placeholder="25"
               />
             </div>
@@ -768,7 +949,7 @@ export default function AdminPage(): JSX.Element {
               <Label>URL бота</Label>
               <Input
                 value={botBaseUrl}
-                onChange={(e) => setBotBaseUrl(e.target.value)}
+                onChange={handleInputChange(setBotBaseUrl)}
                 placeholder="https://t.me/bot_name"
               />
             </div>
@@ -776,7 +957,7 @@ export default function AdminPage(): JSX.Element {
               <Label>Префикс реферальных ссылок</Label>
               <Input
                 value={referralPrefix}
-                onChange={(e) => setReferralPrefix(e.target.value)}
+                onChange={handleInputChange(setReferralPrefix)}
                 placeholder="ref"
               />
             </div>
@@ -785,7 +966,7 @@ export default function AdminPage(): JSX.Element {
               <Input
                 type="number"
                 value={referralBonusPercentage}
-                onChange={(e) => setReferralBonusPercentage(e.target.value)}
+                onChange={handleInputChange(setReferralBonusPercentage)}
                 placeholder="10"
               />
             </div>
@@ -805,7 +986,7 @@ export default function AdminPage(): JSX.Element {
               Последние транзакции
             </h3>
             <div className="flex items-center space-x-2">
-              <Select value={transactionStatusFilter} onValueChange={setTransactionStatusFilter}>
+              <Select value={transactionStatusFilter} onValueChange={handleTransactionStatusFilterChange}>
                 <SelectTrigger className="w-32">
                   <SelectValue />
                 </SelectTrigger>
@@ -817,7 +998,7 @@ export default function AdminPage(): JSX.Element {
                 </SelectContent>
               </Select>
               
-              <Select value={transactionCurrencyFilter} onValueChange={setTransactionCurrencyFilter}>
+              <Select value={transactionCurrencyFilter} onValueChange={handleTransactionCurrencyFilterChange}>
                 <SelectTrigger className="w-32">
                   <SelectValue />
                 </SelectTrigger>
@@ -831,7 +1012,7 @@ export default function AdminPage(): JSX.Element {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setShowTransactions(!showTransactions)}
+                onClick={handleToggleTransactions}
               >
                 {showTransactions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </Button>
