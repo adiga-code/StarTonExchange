@@ -33,11 +33,17 @@ type AdminStats = {
 
 type CurrentSettings = {
   stars_price?: string | number;
-  ton_price?: string | number;
+  ton_markup_percentage?: string | number;
+  ton_price_cache_minutes?: string | number;
+  ton_fallback_price?: string | number;
   bot_base_url?: string;
   referral_prefix?: string;
   referral_bonus_percentage?: string | number;
   referral_registration_bonus?: string | number;
+};
+
+type TONPriceData = {
+  price: string;
 };
 
 export default function AdminPage(): JSX.Element {
@@ -81,6 +87,7 @@ export default function AdminPage(): JSX.Element {
     return Number.isFinite(n) ? n : NaN;
   };
 
+  // Запрос текущих настроек
   const { data: currentSettings } = useQuery<CurrentSettings, Error>({
     queryKey: ["/api/admin/settings/current"],
     queryFn: async () => {
@@ -92,6 +99,22 @@ export default function AdminPage(): JSX.Element {
       return res.json();
     },
     staleTime: 1000 * 60 * 5,
+  });
+
+  // 🚀 Запрос цены TON
+  const { data: tonPriceData, isLoading: isTonPriceLoading } = useQuery<TONPriceData, Error>({
+    queryKey: ["/api/ton-price"],
+    queryFn: async () => {
+      const res = await fetch("/api/ton-price", {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error(`Failed to fetch TON price: ${res.status}`);
+      return res.json();
+    },
+    refetchInterval: 60000, // Обновляем каждую минуту
+    staleTime: 30000, // Данные свежие 30 секунд
+    refetchOnWindowFocus: true, // Обновляем при фокусе окна
   });
 
   useEffect(() => {
@@ -126,6 +149,7 @@ export default function AdminPage(): JSX.Element {
     staleTime: 1000 * 30,
   });
 
+  // 🚀 Улучшенная мутация с автообновлением TON цены
   const updateSettingsMutation = useMutation({
     mutationFn: async (payload: Record<string, any>) => {
       console.log("🔥 [mutationFn] отправляем данные:", payload);
@@ -153,12 +177,32 @@ export default function AdminPage(): JSX.Element {
       
       return json;
     },
-    onSuccess: () => {
-      console.log("✅ Настройки успешно обновлены");
+    onSuccess: (data) => {
+      console.log("✅ Настройки успешно обновлены:", data);
       hapticFeedback("success");
-      toast({ title: "Настройки обновлены", description: "Цены успешно обновлены" });
+      
+      // Базовое уведомление об успехе
+      let description = "Настройки успешно обновлены";
+      
+      // 🚀 Если обновилась цена TON, показываем специальное уведомление
+      if (data?.ton_price_updated && data?.new_ton_price) {
+        description = `Настройки обновлены. Новая цена TON: ₽${data.new_ton_price}`;
+      }
+      
+      toast({ 
+        title: "Настройки обновлены", 
+        description: description
+      });
+      
+      // Инвалидируем все связанные кэши
       queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      
+      // 🚀 ОБНОВЛЯЕМ КЭШ ЦЕНЫ TON
+      if (data?.ton_price_updated) {
+        console.log("🔄 TON price updated, refreshing price cache...");
+        queryClient.invalidateQueries({ queryKey: ["/api/ton-price"] });
+      }
     },
     onError: (err: any) => {
       console.error("❌ Ошибка обновления настроек:", err);
@@ -202,7 +246,6 @@ export default function AdminPage(): JSX.Element {
       return;
     }
     
-    // ✅ ИСПРАВЛЕНО: добавлена недостающая кавычка и правильные условия
     if (s <= 0 || rbp < 0 || tmp < 0 || tcm <= 0 || tfp <= 0 || rrb < 0) {
       toast({ 
         title: "Ошибка валидации", 
@@ -304,7 +347,30 @@ export default function AdminPage(): JSX.Element {
           >
             <h3 className="font-semibold mb-3 flex items-center">
               🚀 Динамическое ценообразование TON
+              {updateSettingsMutation.isPending && (
+                <div className="ml-2 animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+              )}
             </h3>
+            
+            {/* 🚀 Показываем текущую цену TON */}
+            {tonPriceData?.price && (
+              <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium">Текущая цена TON:</span>
+                  <span className="font-bold text-lg text-blue-600">
+                    {isTonPriceLoading ? (
+                      <span className="animate-pulse">Обновляется...</span>
+                    ) : (
+                      `₽${parseFloat(tonPriceData.price).toFixed(2)}`
+                    )}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Обновляется автоматически при изменении настроек
+                </div>
+              </div>
+            )}
+            
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <Label>Наценка (%)</Label>
@@ -434,4 +500,5 @@ export default function AdminPage(): JSX.Element {
         </div>
       </main>
     </div>
-  );}
+  );
+}

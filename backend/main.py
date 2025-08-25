@@ -835,6 +835,9 @@ async def update_admin_settings(
     try:
         logger.info(f"🔥 Received settings update: {settings}")
         
+        # Флаг для отслеживания изменений TON настроек
+        ton_settings_changed = False
+        
         # Обновляем только те настройки, которые переданы
         if settings.stars_price:
             logger.info(f"✅ Updating stars_price to: {settings.stars_price}")
@@ -856,21 +859,49 @@ async def update_admin_settings(
             logger.info(f"✅ Updating referral_registration_bonus to: {settings.referral_registration_bonus}")
             await storage.update_setting("referral_registration_bonus", settings.referral_registration_bonus)
             
-        # TON настройки
+        # TON настройки - отслеживаем изменения
         if settings.ton_markup_percentage:
             logger.info(f"✅ Updating ton_markup_percentage to: {settings.ton_markup_percentage}")
             await storage.update_setting("ton_markup_percentage", settings.ton_markup_percentage)
+            ton_settings_changed = True
             
         if settings.ton_price_cache_minutes:
             logger.info(f"✅ Updating ton_price_cache_minutes to: {settings.ton_price_cache_minutes}")
             await storage.update_setting("ton_price_cache_minutes", settings.ton_price_cache_minutes)
+            ton_settings_changed = True
             
         if settings.ton_fallback_price:
             logger.info(f"✅ Updating ton_fallback_price to: {settings.ton_fallback_price}")
             await storage.update_setting("ton_fallback_price", settings.ton_fallback_price)
+            ton_settings_changed = True
+        
+        # 🚀 АВТООБНОВЛЕНИЕ TON ЦЕНЫ ПРИ ИЗМЕНЕНИИ НАСТРОЕК
+        updated_ton_price = None
+        if ton_settings_changed:
+            try:
+                logger.info("🔄 TON settings changed, forcing price update...")
+                
+                # Очищаем кэш настроек в storage, чтобы получить новые значения
+                if hasattr(storage, '_settings_cache'):
+                    storage._settings_cache.clear()
+                
+                # Принудительно обновляем цену TON с новыми настройками
+                updated_ton_price = await ton_price_service.force_update_price(storage)
+                logger.info(f"✅ TON price auto-updated: {updated_ton_price:.2f} RUB")
+                
+            except Exception as price_update_error:
+                logger.error(f"❌ Failed to auto-update TON price: {price_update_error}")
+                # Не прерываем выполнение, так как основные настройки уже сохранены
         
         logger.info("✅ All settings updated successfully")
-        return {"success": True}
+        
+        # Возвращаем результат с информацией об обновлении цены
+        result = {"success": True}
+        if updated_ton_price is not None:
+            result["ton_price_updated"] = True
+            result["new_ton_price"] = f"{updated_ton_price:.2f}"
+        
+        return result
         
     except Exception as e:
         logger.error(f"❌ Error updating settings: {e}", exc_info=True)
