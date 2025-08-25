@@ -228,8 +228,8 @@ export default function AdminPage(): JSX.Element {
   // Мутации
   const updateSettingsMutation = useMutation({
     mutationFn: async (settings: Partial<CurrentSettings>) => {
-      const response = await fetch("/api/admin/settings/update", {
-        method: "POST",
+      const response = await fetch("/api/admin/settings", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
       });
@@ -634,6 +634,14 @@ export default function AdminPage(): JSX.Element {
                 transition={{ duration: 0.3 }}
                 className="overflow-hidden"
               >
+                {/* Отладочная информация */}
+                {process.env.NODE_ENV === 'development' && (
+                  <div className="text-xs text-gray-500 mb-2">
+                    Debug: isLoading={isLeadersLoading.toString()}, 
+                    leaders_length={referralLeaders?.length || 0}
+                  </div>
+                )}
+                
                 <div className="space-y-2">
                   {isLeadersLoading ? (
                     // Скелетон загрузки
@@ -667,7 +675,12 @@ export default function AdminPage(): JSX.Element {
                       </div>
                     ))
                   ) : (
-                    <p className="text-center text-gray-500 py-8">Лидеров нет</p>
+                    <div className="text-center py-8">
+                      <p className="text-gray-500">Рефералов пока нет</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Лидеры появятся когда пользователи начнут приглашать друзей
+                      </p>
+                    </div>
                   )}
                 </div>
               </motion.div>

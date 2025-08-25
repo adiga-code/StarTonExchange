@@ -1452,110 +1452,92 @@ async def get_admin_referral_leaders(
     sort_by: str = "referral_count",  # "referral_count" или "total_earnings"
     storage: Storage = Depends(get_storage)
 ):
-    """Получить топ-лидеров рефералов"""
+    """Получить топ-лидеров рефералов (УПРОЩЕННАЯ ВЕРСИЯ)"""
     try:
         logger.info(f"🏆 Getting top {limit} referral leaders, sorted by: {sort_by}")
         
-        # Запрос для подсчета рефералов и заработка
-        if sort_by == "total_earnings":
-            # Сортировка по общему заработку от рефералов
-            query = select(
-                User.id,
-                User.username,
-                User.first_name,
-                User.last_name,
-                User.telegram_id,
-                func.count(distinct(User.c.id)).label("referral_count"),
-                func.coalesce(func.sum(Transaction.amount), 0).label("total_earnings")
-            ).select_from(
-                User.join(
-                    select(User.id.label("referral_id")).where(User.referred_by == User.c.id).alias("referrals"),
-                    User.id == "referrals.c.referral_id",
-                    isouter=True
-                ).join(
-                    Transaction,
-                    and_(
-                        Transaction.user_id == User.id,
-                        Transaction.type == "referral_bonus",
-                        Transaction.status == "completed"
-                    ),
-                    isouter=True
-                )
-            ).group_by(User.id, User.username, User.first_name, User.last_name, User.telegram_id)\
-             .having(func.count(distinct(User.c.id)) > 0)\
-             .order_by(desc("total_earnings"))\
-             .limit(limit)
-        else:
-            # Сортировка по количеству рефералов (по умолчанию)
-            # Подзапрос для подсчета рефералов
-            referral_counts = select(
-                User.referred_by.label("referrer_id"),
-                func.count(User.id).label("referral_count")
-            ).where(User.referred_by.isnot(None))\
-             .group_by(User.referred_by)\
-             .subquery()
-            
-            # Подзапрос для подсчета заработка от рефералов
-            referral_earnings = select(
-                Transaction.user_id,
-                func.coalesce(func.sum(Transaction.amount), 0).label("total_earnings")
-            ).where(
-                and_(
-                    Transaction.type == "referral_bonus",
-                    Transaction.status == "completed"
-                )
-            ).group_by(Transaction.user_id).subquery()
-            
-            # Основной запрос
-            query = select(
-                User.id,
-                User.username,
-                User.first_name,
-                User.last_name,
-                User.telegram_id,
-                func.coalesce(referral_counts.c.referral_count, 0).label("referral_count"),
-                func.coalesce(referral_earnings.c.total_earnings, 0).label("total_earnings")
-            ).select_from(
-                User.join(
-                    referral_counts,
-                    User.id == referral_counts.c.referrer_id
-                ).join(
-                    referral_earnings,
-                    User.id == referral_earnings.c.user_id,
-                    isouter=True
-                )
-            ).order_by(desc(referral_counts.c.referral_count))\
-             .limit(limit)
-
-        result = await storage.db.execute(query)
-        leaders_data = result.all()
+        # Простой подсчет рефералов для каждого пользователя
+        referral_query = select(
+            User.referred_by.label("referrer_id"),
+            func.count(User.id).label("referral_count")
+        ).where(
+            User.referred_by.isnot(None)
+        ).group_by(User.referred_by)
+        
+        referral_result = await storage.db.execute(referral_query)
+        referral_data = {row.referrer_id: row.referral_count for row in referral_result.all()}
+        
+        if not referral_data:
+            logger.info("🏆 No referrals found in database")
+            return {
+                "success": True,
+                "leaders": [],
+                "total_count": 0,
+                "sort_by": sort_by
+            }
+        
+        # Получаем информацию о пользователях-реферерах
+        referrer_ids = list(referral_data.keys())
+        users_query = select(User).where(User.id.in_(referrer_ids))
+        users_result = await storage.db.execute(users_query)
+        users = users_result.scalars().all()
+        
+        # Подсчитываем реферальные бонусы для каждого реферера
+        bonus_query = select(
+            Transaction.user_id,
+            func.coalesce(func.sum(Transaction.amount), 0).label("total_earnings")
+        ).where(
+            and_(
+                Transaction.user_id.in_(referrer_ids),
+                Transaction.type == "referral_bonus",
+                Transaction.status == "completed"
+            )
+        ).group_by(Transaction.user_id)
+        
+        bonus_result = await storage.db.execute(bonus_query)
+        bonus_data = {row.user_id: int(row.total_earnings) for row in bonus_result.all()}
         
         # Формируем список лидеров
         leaders = []
-        for i, row in enumerate(leaders_data, 1):
+        for user in users:
+            referral_count = referral_data.get(user.id, 0)
+            total_earnings = bonus_data.get(user.id, 0)
+            
             # Формируем имя пользователя
-            display_name = row.username
+            display_name = user.username
             if not display_name:
-                if row.first_name:
-                    display_name = row.first_name
-                    if row.last_name:
-                        display_name += f" {row.last_name}"
+                if user.first_name:
+                    display_name = user.first_name
+                    if user.last_name:
+                        display_name += f" {user.last_name}"
                 else:
-                    display_name = f"User_{row.telegram_id[-4:]}"  # Последние 4 цифры ID
+                    display_name = f"User_{user.telegram_id[-4:]}"  # Последние 4 цифры ID
                     
             leaders.append({
-                "id": row.id,
+                "id": user.id,
                 "username": display_name,
-                "referral_count": int(row.referral_count or 0),
-                "total_earnings": int(row.total_earnings or 0),
-                "rank": i
+                "referral_count": referral_count,
+                "total_earnings": total_earnings,
+                "rank": 0  # Присвоим ранг после сортировки
             })
         
-        logger.info(f"🏆 Found {len(leaders)} referral leaders")
+        # Сортируем лидеров
+        if sort_by == "total_earnings":
+            leaders.sort(key=lambda x: x["total_earnings"], reverse=True)
+        else:
+            leaders.sort(key=lambda x: x["referral_count"], reverse=True)
+        
+        # Присваиваем ранги и ограничиваем количество
+        final_leaders = []
+        for i, leader in enumerate(leaders[:limit]):
+            leader["rank"] = i + 1
+            final_leaders.append(leader)
+        
+        logger.info(f"🏆 Found {len(final_leaders)} referral leaders")
         return {
             "success": True,
-            "leaders": leaders,
-            "total_count": len(leaders),
+            "leaders": final_leaders,
+            "total_count": len(final_leaders),
             "sort_by": sort_by
         }
         
