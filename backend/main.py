@@ -968,7 +968,15 @@ async def update_admin_settings(
         if settings.ton_fallback_price:
             logger.info(f"✅ Updating ton_fallback_price to: {settings.ton_fallback_price}")
             await storage.update_setting("ton_fallback_price", settings.ton_fallback_price)
-            ton_settings_changed = True
+            ton_settings_changed = True        
+        
+        if settings.taddy_enabled is not None:  # Проверяем именно на None, т.к. может быть False
+            logger.info(f"✅ Updating taddy_enabled to: {settings.taddy_enabled}")
+            await storage.update_setting("taddy_enabled", "true" if settings.taddy_enabled else "false")
+            
+        if settings.taddy_pub_id is not None:
+            logger.info(f"✅ Updating taddy_pub_id to: {settings.taddy_pub_id}")
+            await storage.update_setting("taddy_pub_id", settings.taddy_pub_id)
         
         # 🚀 АВТООБНОВЛЕНИЕ TON ЦЕНЫ ПРИ ИЗМЕНЕНИИ НАСТРОЕК
         updated_ton_price = None
@@ -1243,6 +1251,8 @@ async def get_admin_settings(storage: Storage = Depends(get_storage)):
         "bot_base_url": await storage.get_cached_setting("bot_base_url"),
         "referral_prefix": await storage.get_cached_setting("referral_prefix"),
         "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage"),
+        "taddy_enabled": await storage.get_cached_setting("taddy_enabled"),
+        "taddy_pub_id": await storage.get_cached_setting("taddy_pub_id"),
     }
 
 @app.get("/api/admin/ton-diagnostics")

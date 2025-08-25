@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -29,6 +30,10 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
   const [botBaseUrl, setBotBaseUrl] = useState("");
   const [referralPrefix, setReferralPrefix] = useState("");
   const [referralBonusPercentage, setReferralBonusPercentage] = useState("");
+  
+  // ✅ ДОБАВЛЯЕМ СОСТОЯНИЯ ДЛЯ TADDY
+  const [taddyEnabled, setTaddyEnabled] = useState(false);
+  const [taddyPubId, setTaddyPubId] = useState("");
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -59,6 +64,10 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
       setBotBaseUrl(currentSettings.bot_base_url || "");
       setReferralPrefix(currentSettings.referral_prefix || "");
       setReferralBonusPercentage(currentSettings.referral_bonus_percentage || "");
+      
+      // ✅ ДОБАВЛЯЕМ TADDY НАСТРОЙКИ
+      setTaddyEnabled(currentSettings.taddy_enabled === "true");
+      setTaddyPubId(String(currentSettings.taddy_pub_id || ""));
     }
   }, [currentSettings]);
 
@@ -70,6 +79,9 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
       botBaseUrl: string;
       referralPrefix: string;
       referralBonusPercentage: string;
+      // ✅ ДОБАВЛЯЕМ TADDY ПОЛЯ
+      taddyEnabled: boolean;
+      taddyPubId?: string;
     }) => {
       const response = await apiRequest("PUT", "/api/admin/settings", {
         stars_price: settings.starsPrice,
@@ -78,13 +90,17 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
         bot_base_url: settings.botBaseUrl,
         referral_prefix: settings.referralPrefix,
         referral_bonus_percentage: settings.referralBonusPercentage,
+        
+        // ✅ ДОБАВЛЯЕМ TADDY ПОЛЯ
+        taddy_enabled: settings.taddyEnabled,
+        taddy_pub_id: settings.taddyPubId,
       });
       return response.json();
     },
     onSuccess: () => {
       toast({
         title: "Настройки обновлены",
-        description: "Цены успешно обновлены",
+        description: "Настройки успешно обновлены",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
@@ -106,6 +122,9 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
       botBaseUrl,
       referralPrefix,
       referralBonusPercentage,
+      // ✅ ДОБАВЛЯЕМ TADDY ПОЛЯ
+      taddyEnabled,
+      taddyPubId: taddyPubId.trim() || undefined,
     });
   };
 
@@ -240,14 +259,61 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                   >
                     {updateSettingsMutation.isPending
                       ? "Обновляется..."
-                      : "Обновить цены"}
+                      : "Обновить настройки"}
                   </Button>
+                </div>
+              </motion.div>
+
+              {/* ✅ ДОБАВЛЯЕМ СЕКЦИЮ TADDY */}
+              <motion.div
+                className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+              >
+                <h3 className="font-semibold mb-3 flex items-center">
+                  <Activity className="w-4 h-4 text-blue-400 mr-2" />
+                  Интеграция Taddy
+                </h3>
+                
+                <div className="space-y-3">
+                  {/* Переключатель включения Taddy */}
+                  <div className="flex items-center justify-between p-3 bg-white dark:bg-[#1A1A1C] rounded-lg border border-gray-200 dark:border-white/20">
+                    <Label htmlFor="taddy-enabled" className="text-sm font-medium cursor-pointer">
+                      Включить Taddy SDK
+                    </Label>
+                    <Switch
+                      id="taddy-enabled"
+                      checked={taddyEnabled}
+                      onCheckedChange={setTaddyEnabled}
+                    />
+                  </div>
+
+                  {/* Pub ID (показываем только если включено) */}
+                  {taddyEnabled && (
+                    <div>
+                      <Label htmlFor="taddy-pub-id" className="text-sm text-gray-600 dark:text-gray-400">
+                        Taddy Publisher ID
+                      </Label>
+                      <Input
+                        id="taddy-pub-id"
+                        type="text"
+                        value={taddyPubId}
+                        onChange={(e) => setTaddyPubId(e.target.value)}
+                        placeholder="your-taddy-pub-id-here"
+                        className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        ID издателя из панели управления Taddy
+                      </p>
+                    </div>
+                  )}
                 </div>
               </motion.div>
 
               {/* Referral Settings */}
               <motion.div
-                className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
+                className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.25 }}
@@ -256,30 +322,33 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                   <Shield className="w-4 h-4 text-blue-500 mr-2" />
                   Реферальные настройки
                 </h3>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-3">
                   <div>
-                    <Label>URL бота</Label>
+                    <Label className="text-sm text-gray-600 dark:text-gray-400">URL бота</Label>
                     <Input
                       value={botBaseUrl}
                       onChange={(e) => setBotBaseUrl(e.target.value)}
                       placeholder="https://t.me/bot_name"
+                      className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
                     />
                   </div>
                   <div>
-                    <Label>Префикс реферальных ссылок</Label>
+                    <Label className="text-sm text-gray-600 dark:text-gray-400">Префикс реферальных ссылок</Label>
                     <Input
                       value={referralPrefix}
                       onChange={(e) => setReferralPrefix(e.target.value)}
                       placeholder="ref"
+                      className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
                     />
                   </div>
-                  <div className="col-span-2">
-                    <Label>Процент реферального бонуса (%)</Label>
+                  <div>
+                    <Label className="text-sm text-gray-600 dark:text-gray-400">Процент реферального бонуса (%)</Label>
                     <Input
                       type="number"
                       value={referralBonusPercentage}
                       onChange={(e) => setReferralBonusPercentage(e.target.value)}
                       placeholder="10"
+                      className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
                     />
                   </div>
                 </div>

@@ -254,6 +254,8 @@ class AdminSettingsUpdate(BaseModel):
     bot_base_url: Optional[str] = None
     referral_prefix: Optional[str] = None
     referral_bonus_percentage: Optional[str] = None
+    taddy_enabled: Optional[bool] = None
+    taddy_pub_id: Optional[str] = None
 
 # Payment schemas
 class PaymentCreateResponse(BaseModel):
