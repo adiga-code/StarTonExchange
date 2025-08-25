@@ -805,7 +805,7 @@ async def get_payment_status(
 async def get_admin_stats(storage: Storage = Depends(get_storage)):
     try:
         from datetime import datetime, timedelta
-        from sqlalchemy import func, and_
+        from sqlalchemy import func, and_, select
         
         # Сегодняшняя дата
         today = datetime.utcnow().date()
