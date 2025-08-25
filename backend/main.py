@@ -27,19 +27,16 @@ from robokassa import get_robokassa
 from schemas import *
 from models import User, Transaction
 import json
-import webhooks
-
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Stars Exchange API", version="1.0.0")
-app.include_router(webhooks.router)
 # CORS middleware for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # Vite dev server
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "https://app1.hezh-digital.ru", ],  # Vite dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

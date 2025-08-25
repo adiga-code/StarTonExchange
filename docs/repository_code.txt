@@ -799,15 +799,17 @@ from storage import Storage
 from telegram_auth import get_current_user
 from robokassa import get_robokassa
 from schemas import *
-from models import User
+from models import User, Transaction
 import json
+import webhooks
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Stars Exchange API", version="1.0.0")
-
+app.include_router(webhooks.router)
 # CORS middleware for development
 app.add_middleware(
     CORSMiddleware,
@@ -816,6 +818,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Request logging middleware
 @app.middleware("http")
@@ -1199,7 +1202,8 @@ async def make_purchase(
             description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
             payment_system="robokassa",
             invoice_id=invoice_id,
-            recipient_username=purchase_data.username
+            recipient_username=purchase_data.username,
+            ton_price_at_purchase=Decimal(str(prices["ton"])) if purchase_data.currency == "ton" else None
         )
         
         transaction = await storage.create_transaction(transaction_data)
@@ -1548,45 +1552,100 @@ async def get_payment_status(
         logger.error(f"Error getting payment status: {e}")
         raise HTTPException(status_code=500, detail="Failed to get payment status")
 
-# Admin routes
-@app.get("/api/admin/stats", response_model=AdminStats)
+@app.get("/api/admin/stats")
 async def get_admin_stats(storage: Storage = Depends(get_storage)):
     try:
-        users = await storage.get_all_users()
-        transactions = await storage.get_recent_transactions(50)
-        completed_transactions = [t for t in transactions if t.status == "completed"]
+        from datetime import datetime, timedelta
+        from sqlalchemy import func, and_
         
-        # Calculate today's sales
-        today = date.today()
-        today_sales = sum(
-            float(t.rub_amount or 0) 
-            for t in completed_transactions 
-            if t.created_at.date() == today
+        # Сегодняшняя дата
+        today = datetime.utcnow().date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        # 1. Всего пользователей
+        total_users_result = await storage.db.execute(
+            select(func.count(User.id))
+        )
+        total_users = total_users_result.scalar() or 0
+        
+        # 2. Продаж сегодня (только completed)
+        today_sales_result = await storage.db.execute(
+            select(func.coalesce(func.sum(Transaction.rub_amount), 0))
+            .where(and_(
+                Transaction.status == "completed",
+                Transaction.created_at >= today_start,
+                Transaction.created_at <= today_end,
+                Transaction.type.in_(["buy_stars", "buy_ton"])
+            ))
+        )
+        today_sales = float(today_sales_result.scalar() or 0)
+        
+        # 3. Активные рефералы (у кого есть приглашенные)
+        active_referrals_result = await storage.db.execute(
+            select(func.count(func.distinct(User.referred_by)))
+            .where(User.referred_by.isnot(None))
+        )
+        active_referrals = active_referrals_result.scalar() or 0
+        
+        # 4. Последние 10 транзакций
+        recent_transactions_result = await storage.db.execute(
+            select(Transaction, User.username)
+            .join(User, Transaction.user_id == User.id)
+            .where(Transaction.type.in_(["buy_stars", "buy_ton", "referral_bonus"]))
+            .order_by(Transaction.created_at.desc())
+            .limit(10)
         )
         
-        active_referrals = len([u for u in users if u.referred_by])
-        
-        # Recent transactions with user info
         recent_transactions = []
-        for t in transactions[:10]:
-            user = next((u for u in users if u.id == t.user_id), None)
+        for transaction, username in recent_transactions_result.all():
+            # Простое описание
+            if transaction.type == "buy_stars":
+                desc = f"Купил {int(transaction.amount)} звезд за ₽{transaction.rub_amount}"
+            elif transaction.type == "buy_ton":
+                desc = f"Купил {float(transaction.amount)} TON за ₽{transaction.rub_amount}"
+            elif transaction.type == "referral_bonus":
+                desc = f"Реферальный бонус: {int(transaction.amount)} звезд"
+            else:
+                desc = transaction.description or "Транзакция"
+            
             recent_transactions.append({
-                "id": t.id,
-                "username": user.get("username") if isinstance(user, dict) else (user.username if user else "Unknown"),
-                "description": t.description,
-                "status": t.status,
-                "created_at": t.created_at.isoformat()
+                "id": transaction.id,
+                "username": username or "Пользователь",
+                "description": desc,
+                "status": transaction.status,
+                "createdAt": transaction.created_at.isoformat()
             })
         
-        return AdminStats(
-            total_users=len(users),
-            today_sales=f"{today_sales:.2f}",
-            active_referrals=active_referrals,
-            recent_transactions=recent_transactions
-        )
+        return {
+            "totalUsers": total_users,
+            "todaySales": f"{today_sales:.0f}",
+            "activeReferrals": active_referrals,
+            "recentTransactions": recent_transactions
+        }
+        
     except Exception as e:
-        logger.error(f"Error getting admin stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get admin stats")
+        logger.error(f"Error getting admin stats: {e}", exc_info=True)
+        # Возвращаем пустые данные при ошибке
+        return {
+            "totalUsers": 0,
+            "todaySales": "0",
+            "activeReferrals": 0,
+            "recentTransactions": []
+        }
+
+@app.get("/api/ton-price")
+async def get_ton_price(storage: Storage = Depends(get_storage)):
+    """Получить текущую цену TON в рублях"""
+    try:
+        price = await ton_price_service.get_current_ton_price_rub(storage)
+        return {"price": f"{price:.2f}"}
+    except Exception as e:
+        logger.error(f"Error getting TON price: {e}")
+        # Возвращаем fallback цену в случае ошибки
+        fallback_price = await storage.get_cached_setting("ton_fallback_price")
+        fallback = float(fallback_price) if fallback_price and fallback_price.strip() else 420.0
+        return {"price": f"{fallback:.2f}"}
 
 @app.put("/api/admin/settings")
 async def update_admin_settings(
@@ -1594,41 +1653,79 @@ async def update_admin_settings(
     storage: Storage = Depends(get_storage)
 ):
     try:
-        # ✅ ДОБАВЬ ЭТО ЛОГИРОВАНИЕ:
-        logger.info(f"🔥 Received settings: {settings}")
-        logger.info(f"🔥 stars_price: '{settings.stars_price}' (type: {type(settings.stars_price)})")
-        logger.info(f"🔥 ton_price: '{settings.ton_price}' (type: {type(settings.ton_price)})")
-        logger.info(f"🔥 stars_price bool: {bool(settings.stars_price)}")
-        logger.info(f"🔥 ton_price bool: {bool(settings.ton_price)}")
+        logger.info(f"🔥 Received settings update: {settings}")
         
+        # Флаг для отслеживания изменений TON настроек
+        ton_settings_changed = False
+        
+        # Обновляем только те настройки, которые переданы
         if settings.stars_price:
             logger.info(f"✅ Updating stars_price to: {settings.stars_price}")
             await storage.update_setting("stars_price", settings.stars_price)
-        else:
-            logger.info(f"❌ Skipping stars_price (value: '{settings.stars_price}')")
-        if settings.stars_price:
-            await storage.update_setting("stars_price", settings.stars_price)
-        # if settings.markup_percentage:
-        #     await storage.update_setting("markup_percentage", settings.markup_percentage)
+            
         if settings.bot_base_url:
+            logger.info(f"✅ Updating bot_base_url to: {settings.bot_base_url}")
             await storage.update_setting("bot_base_url", settings.bot_base_url)
+            
         if settings.referral_prefix:
+            logger.info(f"✅ Updating referral_prefix to: {settings.referral_prefix}")
             await storage.update_setting("referral_prefix", settings.referral_prefix)
+            
         if settings.referral_bonus_percentage:
+            logger.info(f"✅ Updating referral_bonus_percentage to: {settings.referral_bonus_percentage}")
             await storage.update_setting("referral_bonus_percentage", settings.referral_bonus_percentage)
+            
         if settings.referral_registration_bonus:
-            await storage.update_setting("referral_registration_bonus", settings.referral_registration_bonus)
             logger.info(f"✅ Updating referral_registration_bonus to: {settings.referral_registration_bonus}")
+            await storage.update_setting("referral_registration_bonus", settings.referral_registration_bonus)
+            
+        # TON настройки - отслеживаем изменения
         if settings.ton_markup_percentage:
+            logger.info(f"✅ Updating ton_markup_percentage to: {settings.ton_markup_percentage}")
             await storage.update_setting("ton_markup_percentage", settings.ton_markup_percentage)
+            ton_settings_changed = True
+            
         if settings.ton_price_cache_minutes:
+            logger.info(f"✅ Updating ton_price_cache_minutes to: {settings.ton_price_cache_minutes}")
             await storage.update_setting("ton_price_cache_minutes", settings.ton_price_cache_minutes)
+            ton_settings_changed = True
+            
         if settings.ton_fallback_price:
+            logger.info(f"✅ Updating ton_fallback_price to: {settings.ton_fallback_price}")
             await storage.update_setting("ton_fallback_price", settings.ton_fallback_price)
-        return {"success": True}
+            ton_settings_changed = True
+        
+        # 🚀 АВТООБНОВЛЕНИЕ TON ЦЕНЫ ПРИ ИЗМЕНЕНИИ НАСТРОЕК
+        updated_ton_price = None
+        if ton_settings_changed:
+            try:
+                logger.info("🔄 TON settings changed, forcing price update...")
+                
+                # Очищаем кэш настроек в storage, чтобы получить новые значения
+                if hasattr(storage, '_settings_cache'):
+                    storage._settings_cache.clear()
+                
+                # Принудительно обновляем цену TON с новыми настройками
+                updated_ton_price = await ton_price_service.force_update_price(storage)
+                logger.info(f"✅ TON price auto-updated: {updated_ton_price:.2f} RUB")
+                
+            except Exception as price_update_error:
+                logger.error(f"❌ Failed to auto-update TON price: {price_update_error}")
+                # Не прерываем выполнение, так как основные настройки уже сохранены
+        
+        logger.info("✅ All settings updated successfully")
+        
+        # Возвращаем результат с информацией об обновлении цены
+        result = {"success": True}
+        if updated_ton_price is not None:
+            result["ton_price_updated"] = True
+            result["new_ton_price"] = f"{updated_ton_price:.2f}"
+        
+        return result
+        
     except Exception as e:
-        logger.error(f"Error updating settings: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update settings")
+        logger.error(f"❌ Error updating settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}")
 
 
 def verify_task_admin(token: str) -> bool:
@@ -1873,6 +1970,61 @@ async def get_admin_settings(storage: Storage = Depends(get_storage)):
         "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage"),
     }
 
+@app.get("/api/admin/ton-diagnostics")
+async def ton_diagnostics(storage: Storage = Depends(get_storage)):
+    """Диагностика TON Price Service"""
+    try:
+        # Получаем настройки
+        cache_minutes = await storage.get_cached_setting("ton_price_cache_minutes")
+        markup = await storage.get_cached_setting("ton_markup_percentage") 
+        fallback = await storage.get_cached_setting("ton_fallback_price")
+        
+        # Статус сервиса
+        service_status = {
+            "last_price": ton_price_service.last_price,
+            "last_update": ton_price_service.last_update.isoformat() if ton_price_service.last_update else None,
+            "settings": {
+                "cache_minutes": cache_minutes,
+                "markup_percentage": markup,
+                "fallback_price": fallback
+            }
+        }
+        
+        # Тестовый запрос цены
+        current_price = await ton_price_service.get_current_ton_price_rub(storage)
+        
+        return {
+            "success": True,
+            "current_price": current_price,
+            "service_status": service_status
+        }
+        
+    except Exception as e:
+        logger.error(f"TON diagnostics error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "service_status": {
+                "last_price": ton_price_service.last_price,
+                "last_update": ton_price_service.last_update.isoformat() if ton_price_service.last_update else None,
+            }
+        }
+
+@app.post("/api/admin/update-ton-price")
+async def force_update_ton_price(storage: Storage = Depends(get_storage)):
+    """Принудительно обновить цену TON"""
+    try:
+        new_price = await ton_price_service.force_update_price(storage)
+        logger.info(f"✅ TON price manually updated: {new_price:.2f} RUB")
+        return {
+            "success": True,
+            "new_price": f"{new_price:.2f}",
+            "updated_at": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to update TON price: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update TON price: {str(e)}")
+
 @app.get("/api/config/referral")
 async def get_referral_config(storage: Storage = Depends(get_storage)):
     return {
@@ -1919,7 +2071,14 @@ async def startup_event():
     
     logger.info(f"FRAGMENT_SEED length: {len(fragment_seed) if fragment_seed else 'None'}")
     logger.info(f"FRAGMENT_COOKIE length: {len(fragment_cookies) if fragment_cookies else 'None'}")
-    
+    try:
+        logger.info("🚀 Initializing TON Price Service...")
+        async with AsyncSessionLocal() as session:
+            storage = Storage(session)
+            initial_price = await ton_price_service.get_current_ton_price_rub(storage)
+            logger.info(f"✅ TON Price Service initialized with price: {initial_price:.2f} RUB")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize TON Price Service: {e}")
     try:
         fragment_seed = os.getenv("FRAGMENT_SEED")
         fragment_cookies = os.getenv("FRAGMENT_COOKIE")
@@ -2026,6 +2185,9 @@ class Transaction(Base):
     rub_amount = Column(Numeric(10, 2), nullable=True)
     status = Column(String, default="pending")  # 'pending', 'completed', 'failed', 'cancelled'
     description = Column(Text, nullable=True)
+    
+    # 🚀 НОВОЕ ПОЛЕ для правильного расчета прибыли от TON
+    ton_price_at_purchase = Column(Numeric(10, 2), nullable=True)  # Цена TON на момент покупки
     
     # Payment system fields
     payment_system = Column(String, nullable=True)  # 'robokassa', 'manual'
@@ -2326,6 +2488,7 @@ class TransactionCreate(BaseModel):
     payment_system: Optional[str] = None
     payment_url: Optional[str] = None
     invoice_id: Optional[str] = None
+    ton_price_at_purchase: Optional[Decimal] = None
 
 class TransactionResponse(BaseModel):
     id: str
@@ -3182,6 +3345,17 @@ class TONPriceService:
             fallback = float(fallback_str) if fallback_str and fallback_str.strip() else 420.0
             return fallback
 
+    async def force_update_price(self, storage):
+        """Принудительно обновить цену TON"""
+        markup_str = await storage.get_cached_setting("ton_markup_percentage") 
+        markup = float(markup_str) if markup_str and markup_str.strip() else 5.0
+        
+        fallback_str = await storage.get_cached_setting("ton_fallback_price")
+        fallback = float(fallback_str) if fallback_str and fallback_str.strip() else 420.0
+        
+        await self._update_price_from_api(markup, fallback)
+        return self.last_price
+
     async def _update_price_from_api(self, markup: float, fallback: float):
         """Обновить цену с внешних API"""
         try:
@@ -3919,7 +4093,7 @@ FILE: frontend\package-lock.json
   "version": "1.0.0",
   "lockfileVersion": 3,
   "requires": true,
-  "packages": {  }
+  "packages": {}
 }
 
 
@@ -5478,9 +5652,19 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     },
   });
 
+  const { data: tonPriceData } = useQuery({
+    queryKey: ['/api/ton-price'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/ton-price');
+      return response.json();
+    },
+    refetchInterval: 60000, // Обновляем каждую минуту
+    staleTime: 30000,
+  });
+
   const prices = {
     stars: adminSettings?.stars_price ? parseFloat(adminSettings.stars_price) : 2.30,
-    ton: 0,
+    ton: tonPriceData?.price ? parseFloat(tonPriceData.price) : 0,
   };
 
  const quickBuyOptions = selectedCurrency === 'stars'
@@ -5515,20 +5699,22 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
            <p className="font-semibold">Telegram Stars</p>
            <p className="text-gray-600 dark:text-gray-400 text-xs">₽{prices.stars} за звезду</p>
          </motion.button>
-         <motion.button
-           onClick={() => handleCurrencySelect('ton')}
-           className={`p-4 rounded-xl border-2 transition-all ${selectedCurrency === 'ton'
-               ? 'border-[#4E7FFF] bg-[#4E7FFF]/10'
-               : 'border-gray-200 dark:border-white/10 hover:border-[#4E7FFF]/50'
-             }`}
-           whileHover={{ scale: 1.02 }}
-           whileTap={{ scale: 0.98 }}
-           disabled={isProcessing}
-         >
-           <Bitcoin className="w-8 h-8 text-[#4E7FFF] mx-auto mb-2" />
-           <p className="font-semibold">TON Coin</p>
-           <p className="text-gray-600 dark:text-gray-400 text-xs">₽{prices.ton} за TON</p>
-         </motion.button>
+          <motion.button
+            onClick={() => handleCurrencySelect('ton')}
+            className={`p-4 rounded-xl border-2 transition-all ${selectedCurrency === 'ton'
+                ? 'border-[#4E7FFF] bg-[#4E7FFF]/10'
+                : 'border-gray-200 dark:border-white/10 hover:border-[#4E7FFF]/50'
+              }`}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            disabled={isProcessing}
+          >
+            <div className="w-8 h-8 text-blue-500 mx-auto mb-2 font-bold text-lg">₿</div>
+            <p className="font-semibold">TON Coin</p>
+            <p className="text-gray-600 dark:text-gray-400 text-xs">
+              {tonPriceData?.price ? `₽${parseFloat(tonPriceData.price).toFixed(2)} за TON` : 'Загрузка...'}
+            </p>
+          </motion.button>
        </div>
      </motion.div>
 
@@ -13560,7 +13746,7 @@ FILE: frontend\src\pages\admin.tsx
 ================================================================================
 
 import React, { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTelegram } from "@/hooks/use-telegram";
@@ -13573,6 +13759,9 @@ import {
   DollarSign,
   Activity,
   ArrowLeft,
+  TrendingUp,
+  ChevronDown,
+  ChevronUp,
 } from "@/components/ui/custom-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13581,7 +13770,7 @@ import { Link } from "wouter";
 
 type AdminStats = {
   totalUsers?: number;
-  todaySales?: number;
+  todaySales?: string;
   activeReferrals?: number;
   recentTransactions?: Array<{
     id: string | number;
@@ -13594,11 +13783,17 @@ type AdminStats = {
 
 type CurrentSettings = {
   stars_price?: string | number;
-  ton_price?: string | number;
+  ton_markup_percentage?: string | number;
+  ton_price_cache_minutes?: string | number;
+  ton_fallback_price?: string | number;
   bot_base_url?: string;
   referral_prefix?: string;
   referral_bonus_percentage?: string | number;
   referral_registration_bonus?: string | number;
+};
+
+type TONPriceData = {
+  price: string;
 };
 
 export default function AdminPage(): JSX.Element {
@@ -13610,28 +13805,25 @@ export default function AdminPage(): JSX.Element {
   const [referralPrefix, setReferralPrefix] = useState<string>("");
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
   const [referralRegistrationBonus, setReferralRegistrationBonus] = useState<string>("");
+  const [showTransactions, setShowTransactions] = useState<boolean>(false);
+  
   const { toast } = useToast();
   const { hapticFeedback } = useTelegram();
   const queryClient = useQueryClient();
 
   const normalizeToStringNumber = (value: any, fallback: string = ""): string => {
-    // Обработка null, undefined, пустых строк
     if (value === null || value === undefined || value === "") {
       return fallback;
     }
-    // Если это уже строка, проверяем что она валидна
     if (typeof value === "string") {
       const trimmed = value.trim();
       if (trimmed === "") return fallback;
-      // Проверяем что это валидное число
       const num = parseFloat(trimmed.replace(",", "."));
       return Number.isFinite(num) ? trimmed : fallback;
     }
-    // Если это число
     if (typeof value === "number" && Number.isFinite(value)) {
       return String(value);
     }
-    // Во всех остальных случаях возвращаем fallback
     return fallback;
   };
 
@@ -13642,6 +13834,7 @@ export default function AdminPage(): JSX.Element {
     return Number.isFinite(n) ? n : NaN;
   };
 
+  // Запрос текущих настроек
   const { data: currentSettings } = useQuery<CurrentSettings, Error>({
     queryKey: ["/api/admin/settings/current"],
     queryFn: async () => {
@@ -13655,26 +13848,24 @@ export default function AdminPage(): JSX.Element {
     staleTime: 1000 * 60 * 5,
   });
 
-  useEffect(() => {
-    if (!currentSettings) return;
-    
-    console.log("🔍 Загружаемые настройки:", currentSettings);
-    
-    // Используем улучшенную нормализацию с правильными fallback значениями
-    setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
-    setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5.0"));
-    setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
-    setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420.0"));
-    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25.0"));
-    
-    setBotBaseUrl(currentSettings.bot_base_url || "https://t.me/starsguru_official_bot");
-    setReferralPrefix(currentSettings.referral_prefix || "ref");
-    setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, "5.0"));
-    
-    console.log("✅ Настройки инициализированы");
-  }, [currentSettings]);
+  // 🚀 Запрос цены TON
+  const { data: tonPriceData, isLoading: isTonPriceLoading } = useQuery<TONPriceData, Error>({
+    queryKey: ["/api/ton-price"],
+    queryFn: async () => {
+      const res = await fetch("/api/ton-price", {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error(`Failed to fetch TON price: ${res.status}`);
+      return res.json();
+    },
+    refetchInterval: 60000,
+    staleTime: 30000,
+    refetchOnWindowFocus: true,
+  });
 
-  const { data: adminStats } = useQuery<AdminStats, Error>({
+  // 🚀 Запрос реальной статистики
+  const { data: adminStats, isLoading: isStatsLoading } = useQuery<AdminStats, Error>({
     queryKey: ["/api/admin/stats"],
     queryFn: async () => {
       const res = await fetch("/api/admin/stats", {
@@ -13685,12 +13876,25 @@ export default function AdminPage(): JSX.Element {
       return res.json() as Promise<AdminStats>;
     },
     staleTime: 1000 * 30,
+    refetchInterval: 60000, // Обновляем каждую минуту
   });
+
+  useEffect(() => {
+    if (!currentSettings) return;
+    
+    setStarsPrice(normalizeToStringNumber(currentSettings.stars_price, "1.50"));
+    setTonMarkupPercentage(normalizeToStringNumber(currentSettings.ton_markup_percentage, "5.0"));
+    setTonCacheMinutes(normalizeToStringNumber(currentSettings.ton_price_cache_minutes, "15"));
+    setTonFallbackPrice(normalizeToStringNumber(currentSettings.ton_fallback_price, "420.0"));
+    setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25.0"));
+    
+    setBotBaseUrl(currentSettings.bot_base_url || "https://t.me/starsguru_official_bot");
+    setReferralPrefix(currentSettings.referral_prefix || "ref");
+    setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, "5.0"));
+  }, [currentSettings]);
 
   const updateSettingsMutation = useMutation({
     mutationFn: async (payload: Record<string, any>) => {
-      console.log("🔥 [mutationFn] отправляем данные:", payload);
-      
       const res = await fetch("/api/admin/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -13698,8 +13902,6 @@ export default function AdminPage(): JSX.Element {
       });
       
       const text = await res.text().catch(() => "");
-      console.log(`📡 Ответ сервера (${res.status}):`, text);
-      
       let json;
       try {
         json = text ? JSON.parse(text) : null;
@@ -13708,21 +13910,32 @@ export default function AdminPage(): JSX.Element {
       }
       
       if (!res.ok) {
-        console.error("❌ Ошибка ответа:", res.status, json);
         throw new Error(`Ошибка обновления: ${res.status} ${JSON.stringify(json)}`);
       }
       
       return json;
     },
-    onSuccess: () => {
-      console.log("✅ Настройки успешно обновлены");
+    onSuccess: (data) => {
       hapticFeedback("success");
-      toast({ title: "Настройки обновлены", description: "Цены успешно обновлены" });
+      
+      let description = "Настройки успешно обновлены";
+      if (data?.ton_price_updated && data?.new_ton_price) {
+        description = `Настройки обновлены. Новая цена TON: ₽${data.new_ton_price}`;
+      }
+      
+      toast({ 
+        title: "Настройки обновлены", 
+        description: description
+      });
+      
       queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      
+      if (data?.ton_price_updated) {
+        queryClient.invalidateQueries({ queryKey: ["/api/ton-price"] });
+      }
     },
     onError: (err: any) => {
-      console.error("❌ Ошибка обновления настроек:", err);
       hapticFeedback("error");
       toast({ 
         title: "Ошибка", 
@@ -13732,9 +13945,7 @@ export default function AdminPage(): JSX.Element {
     },
   });
 
-  // Исправляем синтаксическую ошибку в валидации
   const handleUpdatePrices = () => {
-    // Добавляем проверку всех TON полей
     if (!starsPrice || !botBaseUrl || !referralPrefix || !referralBonusPercentage || 
         !tonMarkupPercentage || !referralRegistrationBonus || 
         !tonCacheMinutes || !tonFallbackPrice) {
@@ -13763,7 +13974,6 @@ export default function AdminPage(): JSX.Element {
       return;
     }
     
-    // ✅ ИСПРАВЛЕНО: добавлена недостающая кавычка и правильные условия
     if (s <= 0 || rbp < 0 || tmp < 0 || tcm <= 0 || tfp <= 0 || rrb < 0) {
       toast({ 
         title: "Ошибка валидации", 
@@ -13773,7 +13983,6 @@ export default function AdminPage(): JSX.Element {
       return;
     }
 
-    // ✅ Отправляем правильные поля
     updateSettingsMutation.mutate({
       stars_price: starsPrice,
       ton_markup_percentage: tonMarkupPercentage,
@@ -13803,31 +14012,63 @@ export default function AdminPage(): JSX.Element {
       </header>
 
       <main className="p-4 space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <motion.div className="bg-white dark:bg-[#1A1A1C] rounded-xl p-4 shadow-lg" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <h3 className="font-semibold mb-3 flex items-center"><BarChart3 className="w-4 h-4 text-green-500 mr-2" />Статистика</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400 flex items-center"><Users className="w-4 h-4 mr-1" />Пользователей</span>
-                <span className="font-semibold">{adminStats?.totalUsers ?? 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400 flex items-center"><DollarSign className="w-4 h-4 mr-1" />Продаж сегодня</span>
-                <span className="font-semibold text-green-500">₽{adminStats?.todaySales ?? 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400 flex items-center"><Activity className="w-4 h-4 mr-1" />Активных рефералов</span>
-                <span className="font-semibold">{adminStats?.activeReferrals ?? 0}</span>
-              </div>
+        {/* 🚀 УЛУЧШЕННАЯ СТАТИСТИКА */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <motion.div 
+            className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl p-4 border border-blue-200 dark:border-blue-700"
+            initial={{ opacity: 0, y: 20 }} 
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0 }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <Users className="w-8 h-8 text-blue-500" />
+              {isStatsLoading && <div className="w-4 h-4 animate-spin border-2 border-blue-500 border-t-transparent rounded-full" />}
             </div>
+            <h3 className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              {adminStats?.totalUsers?.toLocaleString() || 0}
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Всего пользователей</p>
           </motion.div>
 
+          <motion.div 
+            className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl p-4 border border-green-200 dark:border-green-700"
+            initial={{ opacity: 0, y: 20 }} 
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <DollarSign className="w-8 h-8 text-green-500" />
+              <TrendingUp className="w-5 h-5 text-green-400" />
+            </div>
+            <h3 className="text-2xl font-bold text-green-600 dark:text-green-400">
+              ₽{adminStats?.todaySales ? parseFloat(adminStats.todaySales).toLocaleString() : '0'}
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Продаж сегодня</p>
+          </motion.div>
+
+          <motion.div 
+            className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-xl p-4 border border-purple-200 dark:border-purple-700"
+            initial={{ opacity: 0, y: 20 }} 
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <Activity className="w-8 h-8 text-purple-500" />
+            </div>
+            <h3 className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+              {adminStats?.activeReferrals || 0}
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Активных рефералов</p>
+          </motion.div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Price Settings */}
           <motion.div
             className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
+            transition={{ delay: 0.3 }}
           >
             <h3 className="font-semibold mb-3 flex items-center">
               <Tag className="w-4 h-4 text-green-500 mr-2" />
@@ -13858,15 +14099,35 @@ export default function AdminPage(): JSX.Element {
 
           {/* TON Dynamic Pricing */}
           <motion.div
-            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
+            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
+            transition={{ delay: 0.4 }}
           >
             <h3 className="font-semibold mb-3 flex items-center">
-              🚀 Динамическое ценообразование TON
+              🚀 TON ценообразование
+              {updateSettingsMutation.isPending && (
+                <div className="ml-2 animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+              )}
             </h3>
-            <div className="grid grid-cols-3 gap-4">
+            
+            {/* Текущая цена TON */}
+            {tonPriceData?.price && (
+              <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium">Текущая цена:</span>
+                  <span className="font-bold text-lg text-blue-600">
+                    {isTonPriceLoading ? (
+                      <span className="animate-pulse">Обновляется...</span>
+                    ) : (
+                      `₽${parseFloat(tonPriceData.price).toFixed(2)}`
+                    )}
+                  </span>
+                </div>
+              </div>
+            )}
+            
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Наценка (%)</Label>
                 <Input
@@ -13875,15 +14136,6 @@ export default function AdminPage(): JSX.Element {
                   value={tonMarkupPercentage}
                   onChange={(e) => setTonMarkupPercentage(e.target.value)}
                   placeholder="5"
-                />
-              </div>
-              <div>
-                <Label>Обновление (мин)</Label>
-                <Input
-                  type="number"
-                  value={tonCacheMinutes}
-                  onChange={(e) => setTonCacheMinutes(e.target.value)}
-                  placeholder="15"
                 />
               </div>
               <div>
@@ -13898,104 +14150,130 @@ export default function AdminPage(): JSX.Element {
               </div>
             </div>
           </motion.div>
+        </div>
 
-          {/* Referral Settings */}
-          <motion.div
-            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 }}
-          >
-            <h3 className="font-semibold mb-3 flex items-center">
-              <Shield className="w-4 h-4 text-blue-500 mr-2" />
-              Реферальные настройки
-            </h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>URL бота</Label>
-                <Input
-                  value={botBaseUrl}
-                  onChange={(e) => setBotBaseUrl(e.target.value)}
-                  placeholder="https://t.me/bot_name"
-                />
-              </div>
-              <div>
-                <Label>Префикс реферальных ссылок</Label>
-                <Input
-                  value={referralPrefix}
-                  onChange={(e) => setReferralPrefix(e.target.value)}
-                  placeholder="ref"
-                />
-              </div>
-              <div>
-                <Label>Процент с покупок (%)</Label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={referralBonusPercentage}
-                  onChange={(e) => setReferralBonusPercentage(e.target.value)}
-                  placeholder="5"
-                />
-              </div>
-              <div>
-                <Label>Награда за приглашение (звезды) 🎁</Label>
-                <Input
-                  type="number"
-                  value={referralRegistrationBonus}
-                  onChange={(e) => setReferralRegistrationBonus(e.target.value)}
-                  placeholder="25"
-                />
-              </div>
+        {/* Referral Settings */}
+        <motion.div
+          className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+        >
+          <h3 className="font-semibold mb-3 flex items-center">
+            <Shield className="w-4 h-4 text-blue-500 mr-2" />
+            Реферальные настройки
+          </h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>URL бота</Label>
+              <Input
+                value={botBaseUrl}
+                onChange={(e) => setBotBaseUrl(e.target.value)}
+                placeholder="https://t.me/bot_name"
+              />
             </div>
-          </motion.div>
+            <div>
+              <Label>Префикс реферальных ссылок</Label>
+              <Input
+                value={referralPrefix}
+                onChange={(e) => setReferralPrefix(e.target.value)}
+                placeholder="ref"
+              />
+            </div>
+            <div>
+              <Label>Процент с покупок (%)</Label>
+              <Input
+                type="number"
+                step="0.1"
+                value={referralBonusPercentage}
+                onChange={(e) => setReferralBonusPercentage(e.target.value)}
+                placeholder="5"
+              />
+            </div>
+            <div>
+              <Label>Награда за приглашение 🎁</Label>
+              <Input
+                type="number"
+                value={referralRegistrationBonus}
+                onChange={(e) => setReferralRegistrationBonus(e.target.value)}
+                placeholder="25"
+              />
+            </div>
+          </div>
+        </motion.div>
 
-          {/* Recent Transactions */}
-          <motion.div
-            className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <h3 className="font-semibold mb-3 flex items-center">
+        {/* 🚀 УЛУЧШЕННЫЕ ТРАНЗАКЦИИ */}
+        <motion.div
+          className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold flex items-center">
               <History className="w-4 h-4 text-[#4E7FFF] mr-2" />
               Последние транзакции
             </h3>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowTransactions(!showTransactions)}
+              className="flex items-center gap-1"
+            >
+              {showTransactions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {showTransactions ? 'Свернуть' : 'Развернуть'}
+            </Button>
+          </div>
+          
+          <AnimatePresence>
+            <motion.div 
+              className="space-y-2 max-h-80 overflow-y-auto"
+              initial={false}
+              animate={{ height: showTransactions ? 'auto' : '200px' }}
+              transition={{ duration: 0.3 }}
+            >
               {adminStats?.recentTransactions?.length ? (
-                adminStats.recentTransactions.map((transaction, index) => (
-                  <div
-                    key={`${transaction.id}-${index}`}
-                    className="flex justify-between items-center p-2 bg-white dark:bg-[#1A1A1C] rounded-lg"
-                  >
-                    <div>
-                      <p className="font-medium">{transaction.username || 'Неизвестный'}</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">
-                        {transaction.description || 'Транзакция'}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-sm font-semibold ${
-                        transaction.status === 'completed' ? 'text-green-500' : 
-                        transaction.status === 'failed' ? 'text-red-500' : 'text-yellow-500'
-                      }`}>
-                        {transaction.status === 'completed' ? 'Завершено' : 
-                        transaction.status === 'failed' ? 'Не удалось' : 'В процессе'}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {transaction.createdAt ? new Date(transaction.createdAt).toLocaleDateString() : ''}
-                      </p>
-                    </div>
-                  </div>
-                ))
+                adminStats.recentTransactions
+                  .slice(0, showTransactions ? adminStats.recentTransactions.length : 3)
+                  .map((transaction, index) => (
+                    <motion.div
+                      key={`${transaction.id}-${index}`}
+                      className="flex justify-between items-center p-3 bg-white dark:bg-[#1A1A1C] rounded-lg border border-gray-200 dark:border-white/10"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                    >
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">{transaction.username}</p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400">
+                          {transaction.description}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                          transaction.status === 'completed' ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 
+                          transaction.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400' : 
+                          'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400'
+                        }`}>
+                          {transaction.status === 'completed' ? '✓' : 
+                          transaction.status === 'failed' ? '✗' : '⏳'}
+                        </span>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {transaction.createdAt ? new Date(transaction.createdAt).toLocaleDateString('ru') : ''}
+                        </p>
+                      </div>
+                    </motion.div>
+                  ))
               ) : (
-                <p className="text-gray-500 text-center py-4">Нет последних транзакций</p>
+                <p className="text-gray-500 text-center py-8">Нет транзакций</p>
               )}
-            </div>
-          </motion.div>
-        </div>
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
       </main>
     </div>
-  );}
+  );
+}
 
 ================================================================================
 FILE: frontend\src\pages\home.tsx
