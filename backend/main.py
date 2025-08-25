@@ -25,15 +25,16 @@ from storage import Storage
 from telegram_auth import get_current_user
 from robokassa import get_robokassa
 from schemas import *
-from models import User
+from models import User, Transaction
 import json
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Stars Exchange API", version="1.0.0")
-
+app.include_router(webhooks.router)
 # CORS middleware for development
 app.add_middleware(
     CORSMiddleware,
@@ -42,6 +43,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Request logging middleware
 @app.middleware("http")
@@ -425,7 +427,8 @@ async def make_purchase(
             description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
             payment_system="robokassa",
             invoice_id=invoice_id,
-            recipient_username=purchase_data.username
+            recipient_username=purchase_data.username,
+            ton_price_at_purchase=Decimal(str(prices["ton"])) if purchase_data.currency == "ton" else None
         )
         
         transaction = await storage.create_transaction(transaction_data)
@@ -774,45 +777,87 @@ async def get_payment_status(
         logger.error(f"Error getting payment status: {e}")
         raise HTTPException(status_code=500, detail="Failed to get payment status")
 
-# Admin routes
-@app.get("/api/admin/stats", response_model=AdminStats)
+@app.get("/api/admin/stats")
 async def get_admin_stats(storage: Storage = Depends(get_storage)):
     try:
-        users = await storage.get_all_users()
-        transactions = await storage.get_recent_transactions(50)
-        completed_transactions = [t for t in transactions if t.status == "completed"]
+        from datetime import datetime, timedelta
+        from sqlalchemy import func, and_
         
-        # Calculate today's sales
-        today = date.today()
-        today_sales = sum(
-            float(t.rub_amount or 0) 
-            for t in completed_transactions 
-            if t.created_at.date() == today
+        # Сегодняшняя дата
+        today = datetime.utcnow().date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        # 1. Всего пользователей
+        total_users_result = await storage.db.execute(
+            select(func.count(User.id))
+        )
+        total_users = total_users_result.scalar() or 0
+        
+        # 2. Продаж сегодня (только completed)
+        today_sales_result = await storage.db.execute(
+            select(func.coalesce(func.sum(Transaction.rub_amount), 0))
+            .where(and_(
+                Transaction.status == "completed",
+                Transaction.created_at >= today_start,
+                Transaction.created_at <= today_end,
+                Transaction.type.in_(["buy_stars", "buy_ton"])
+            ))
+        )
+        today_sales = float(today_sales_result.scalar() or 0)
+        
+        # 3. Активные рефералы (у кого есть приглашенные)
+        active_referrals_result = await storage.db.execute(
+            select(func.count(func.distinct(User.referred_by)))
+            .where(User.referred_by.isnot(None))
+        )
+        active_referrals = active_referrals_result.scalar() or 0
+        
+        # 4. Последние 10 транзакций
+        recent_transactions_result = await storage.db.execute(
+            select(Transaction, User.username)
+            .join(User, Transaction.user_id == User.id)
+            .where(Transaction.type.in_(["buy_stars", "buy_ton", "referral_bonus"]))
+            .order_by(Transaction.created_at.desc())
+            .limit(10)
         )
         
-        active_referrals = len([u for u in users if u.referred_by])
-        
-        # Recent transactions with user info
         recent_transactions = []
-        for t in transactions[:10]:
-            user = next((u for u in users if u.id == t.user_id), None)
+        for transaction, username in recent_transactions_result.all():
+            # Простое описание
+            if transaction.type == "buy_stars":
+                desc = f"Купил {int(transaction.amount)} звезд за ₽{transaction.rub_amount}"
+            elif transaction.type == "buy_ton":
+                desc = f"Купил {float(transaction.amount)} TON за ₽{transaction.rub_amount}"
+            elif transaction.type == "referral_bonus":
+                desc = f"Реферальный бонус: {int(transaction.amount)} звезд"
+            else:
+                desc = transaction.description or "Транзакция"
+            
             recent_transactions.append({
-                "id": t.id,
-                "username": user.get("username") if isinstance(user, dict) else (user.username if user else "Unknown"),
-                "description": t.description,
-                "status": t.status,
-                "created_at": t.created_at.isoformat()
+                "id": transaction.id,
+                "username": username or "Пользователь",
+                "description": desc,
+                "status": transaction.status,
+                "createdAt": transaction.created_at.isoformat()
             })
         
-        return AdminStats(
-            total_users=len(users),
-            today_sales=f"{today_sales:.2f}",
-            active_referrals=active_referrals,
-            recent_transactions=recent_transactions
-        )
+        return {
+            "totalUsers": total_users,
+            "todaySales": f"{today_sales:.0f}",
+            "activeReferrals": active_referrals,
+            "recentTransactions": recent_transactions
+        }
+        
     except Exception as e:
-        logger.error(f"Error getting admin stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get admin stats")
+        logger.error(f"Error getting admin stats: {e}", exc_info=True)
+        # Возвращаем пустые данные при ошибке
+        return {
+            "totalUsers": 0,
+            "todaySales": "0",
+            "activeReferrals": 0,
+            "recentTransactions": []
+        }
 
 @app.get("/api/ton-price")
 async def get_ton_price(storage: Storage = Depends(get_storage)):

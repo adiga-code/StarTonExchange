@@ -49,6 +49,7 @@ class TransactionCreate(BaseModel):
     payment_system: Optional[str] = None
     payment_url: Optional[str] = None
     invoice_id: Optional[str] = None
+    ton_price_at_purchase: Optional[Decimal] = None
 
 class TransactionResponse(BaseModel):
     id: str

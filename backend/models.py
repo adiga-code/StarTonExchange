@@ -44,6 +44,9 @@ class Transaction(Base):
     status = Column(String, default="pending")  # 'pending', 'completed', 'failed', 'cancelled'
     description = Column(Text, nullable=True)
     
+    # 🚀 НОВОЕ ПОЛЕ для правильного расчета прибыли от TON
+    ton_price_at_purchase = Column(Numeric(10, 2), nullable=True)  # Цена TON на момент покупки
+    
     # Payment system fields
     payment_system = Column(String, nullable=True)  # 'robokassa', 'manual'
     payment_url = Column(Text, nullable=True)  # URL для оплаты
