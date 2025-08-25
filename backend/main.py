@@ -169,83 +169,109 @@ async def get_user_transactions_history(
 ):
     """Получить историю транзакций пользователя"""
     try:
-        transactions = await storage.get_transactions_by_user_id(current_user.id)
+        logger.info(f"Getting transaction history for user: {current_user.id}")
         
-        # Фильтруем только покупки (тип "purchase")
-        purchase_transactions = [t for t in transactions if t.type == "purchase"]
+        # Получаем все транзакции пользователя
+        transactions = await storage.get_transactions_by_user_id(current_user.id)
+        logger.info(f"Found {len(transactions)} transactions for user")
+        
+        # Фильтруем только покупки (тип "purchase" или "buy_stars"/"buy_ton")
+        purchase_transactions = [
+            t for t in transactions 
+            if t.type in ["purchase", "buy_stars", "buy_ton"]
+        ]
         
         # Преобразуем в нужный формат для фронтенда
         transaction_history = []
+        
         for transaction in purchase_transactions:
-            # Определяем тип транзакции и иконку
-            transaction_type = "purchase"
-            icon_type = "star" if transaction.currency == "stars" else "ton"
-            
-            # Форматируем описание
-            if transaction.type == "purchase":
+            try:
+                # Определяем тип транзакции и иконку
                 if transaction.currency == "stars":
+                    icon_type = "stars"
+                    currency_symbol = "⭐"
                     description = f"Покупка {int(transaction.amount)} звезд"
                 elif transaction.currency == "ton":
+                    icon_type = "ton"  
+                    currency_symbol = "💎"
                     description = f"Покупка {float(transaction.amount)} TON"
                 else:
-                    description = transaction.description or f"Покупка {transaction.currency}"
-            elif transaction.type == "task_reward":
-                description = transaction.description or f"Награда за задание"
-                icon_type = "star"
-            else:
-                description = transaction.description or f"Транзакция {transaction.type}"
-            
-            # Определяем статус на русском
-            status_map = {
-                "completed": "Успешно",
-                "pending": "В обработке",
-                "failed": "Ошибка",
-                "cancelled": "Отменено"
-            }
-            status_text = status_map.get(transaction.status, transaction.status)
-            
-            # Определяем цвет статуса
-            status_color = {
-                "completed": "green",
-                "pending": "yellow", 
-                "failed": "red",
-                "cancelled": "gray"
-            }.get(transaction.status, "gray")
-            
-            # Форматирование даты с русскими месяцами
-            month_names = {
-                1: "янв", 2: "фев", 3: "мар", 4: "апр", 5: "май", 6: "июн",
-                7: "июл", 8: "авг", 9: "сен", 10: "окт", 11: "ноя", 12: "дек"
-            }
-            created_date = transaction.created_at
-            formatted_date = f"{created_date.day} {month_names[created_date.month]} {created_date.year}, {created_date.strftime('%H:%M')}"
-            
-            transaction_history.append({
-                "id": transaction.id,
-                "description": description,
-                "amount": float(transaction.amount),
-                "currency": transaction.currency,
-                "rub_amount": float(transaction.rub_amount) if transaction.rub_amount else None,
-                "status": transaction.status,
-                "status_text": status_text,
-                "status_color": status_color,
-                "icon_type": icon_type,
-                "created_at": transaction.created_at.isoformat(),
-                "created_at_formatted": formatted_date
-            })
+                    icon_type = "purchase"
+                    currency_symbol = "💰"
+                    description = transaction.description or "Покупка"
+                
+                # Определяем статус и его цвет
+                status_map = {
+                    "pending": {"text": "Ожидание", "color": "#F59E0B"},
+                    "completed": {"text": "Завершено", "color": "#10B981"},
+                    "failed": {"text": "Ошибка", "color": "#EF4444"},
+                    "cancelled": {"text": "Отменено", "color": "#6B7280"}
+                }
+                
+                status_info = status_map.get(transaction.status, {
+                    "text": transaction.status.capitalize(), 
+                    "color": "#6B7280"
+                })
+                
+                # Форматируем дату с русскими месяцами
+                month_names = {
+                    1: "янв", 2: "фев", 3: "мар", 4: "апр", 5: "май", 6: "июн",
+                    7: "июл", 8: "авг", 9: "сен", 10: "окт", 11: "ноя", 12: "дек"
+                }
+                
+                created_date = transaction.created_at
+                if created_date:
+                    formatted_date = f"{created_date.day} {month_names[created_date.month]} {created_date.year}, {created_date.strftime('%H:%M')}"
+                    iso_date = created_date.isoformat()
+                else:
+                    formatted_date = "Дата неизвестна"
+                    iso_date = "1970-01-01T00:00:00"
+                
+                # Безопасное преобразование сумм
+                amount = float(transaction.amount) if transaction.amount else 0.0
+                rub_amount = float(transaction.rub_amount) if transaction.rub_amount else None
+                
+                transaction_item = {
+                    "id": transaction.id,
+                    "description": description,
+                    "amount": amount,
+                    "currency": transaction.currency,
+                    "rub_amount": rub_amount,
+                    "status": transaction.status,
+                    "status_text": status_info["text"],
+                    "status_color": status_info["color"],
+                    "icon_type": icon_type,
+                    "created_at": iso_date,
+                    "created_at_formatted": formatted_date
+                }
+                
+                transaction_history.append(transaction_item)
+                
+            except Exception as e:
+                logger.error(f"Error processing transaction {transaction.id}: {e}")
+                # Пропускаем проблемные транзакции, но не падаем
+                continue
         
         # Сортируем по дате создания (новые сверху)
         transaction_history.sort(key=lambda x: x["created_at"], reverse=True)
         
-        return {
+        result = {
             "success": True, 
             "transactions": transaction_history,
             "count": len(transaction_history)
         }
         
+        logger.info(f"Returning {len(transaction_history)} transactions for user")
+        return result
+        
     except Exception as e:
-        logger.error(f"Error getting transactions history: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get transactions history")
+        logger.error(f"Error getting transactions history for user {current_user.id}: {e}", exc_info=True)
+        # Возвращаем пустую историю вместо ошибки
+        return {
+            "success": False,
+            "transactions": [],
+            "count": 0
+        }
 
 @app.get("/api/getPhoto")
 async def get_photo(username: str):
