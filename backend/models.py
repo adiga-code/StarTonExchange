@@ -58,7 +58,7 @@ class Transaction(Base):
     
     # Relationships
     user = relationship("User", back_populates="transactions")
-
+ 
 class Task(Base):
     __tablename__ = "tasks"
     
