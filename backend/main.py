@@ -1317,6 +1317,401 @@ async def get_interface_texts(storage: Storage = Depends(get_storage)):
         "error": await storage.get_cached_setting("error")
     }
 
+@app.get("/api/admin/profit-stats", response_model=ProfitStatsResponse)
+async def get_admin_profit_stats(
+    period: Optional[str] = "all",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    storage: Storage = Depends(get_storage)
+):
+    """Получить статистику прибыли за период"""
+    try:
+        logger.info(f"📊 Getting profit stats for period: {period}")
+        
+        # Определяем период
+        today = datetime.utcnow().date()
+        if period == "today":
+            start_date = datetime.combine(today, datetime.min.time())
+            end_date = datetime.combine(today, datetime.max.time())
+        elif period == "week":
+            start_date = datetime.combine(today - timedelta(days=7), datetime.min.time())
+            end_date = datetime.combine(today, datetime.max.time())
+        elif period == "month":
+            start_date = datetime.combine(today - timedelta(days=30), datetime.min.time())
+            end_date = datetime.combine(today, datetime.max.time())
+        elif period == "custom" and date_from and date_to:
+            start_date = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+            end_date = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+        else:
+            # За всё время
+            start_date = None
+            end_date = None
+
+        # Базовый запрос для completed транзакций
+        base_query = select(Transaction).where(
+            and_(
+                Transaction.status == "completed",
+                Transaction.type.in_(["buy_stars", "buy_ton", "purchase"])
+            )
+        )
+        
+        # Добавляем фильтр по дате если нужно
+        if start_date and end_date:
+            base_query = base_query.where(
+                and_(
+                    Transaction.created_at >= start_date,
+                    Transaction.created_at <= end_date
+                )
+            )
+
+        # Получаем все транзакции
+        result = await storage.db.execute(base_query)
+        transactions = result.scalars().all()
+        
+        logger.info(f"📊 Found {len(transactions)} transactions for profit calculation")
+
+        # Получаем текущие настройки для расчета
+        stars_price = await storage.get_cached_setting("stars_price") or "1.3"
+        current_stars_price = float(stars_price)
+        
+        # Расчет прибыли
+        ton_profit = 0.0
+        stars_profit = 0.0
+        total_revenue = 0.0
+
+        for transaction in transactions:
+            if not transaction.rub_amount:
+                continue
+                
+            revenue = float(transaction.rub_amount)
+            total_revenue += revenue
+            
+            if transaction.currency == "ton" and transaction.ton_price_at_purchase:
+                # Прибыль от TON: (цена продажи - биржевая цена на момент покупки) × количество
+                market_price = float(transaction.ton_price_at_purchase)
+                ton_amount = float(transaction.amount)
+                
+                # Наша цена за 1 TON = rub_amount / amount
+                our_price = revenue / ton_amount if ton_amount > 0 else 0
+                
+                profit_per_ton = our_price - market_price
+                ton_profit += profit_per_ton * ton_amount
+                
+                logger.debug(f"TON transaction: our_price={our_price}, market_price={market_price}, amount={ton_amount}, profit={profit_per_ton * ton_amount}")
+                
+            elif transaction.currency == "stars":
+                # Прибыль от Stars: (биржевая цена - наша цена) × количество
+                # Биржевая цена Stars = 1.8₽ (фиксированная цена Telegram)
+                telegram_price = 1.8
+                stars_amount = int(transaction.amount)
+                
+                # Наша цена за 1 Star = rub_amount / amount
+                our_price = revenue / stars_amount if stars_amount > 0 else 0
+                
+                profit_per_star = telegram_price - our_price
+                stars_profit += profit_per_star * stars_amount
+                
+                logger.debug(f"Stars transaction: telegram_price={telegram_price}, our_price={our_price}, amount={stars_amount}, profit={profit_per_star * stars_amount}")
+
+        total_profit = ton_profit + stars_profit
+        margin_percentage = (total_profit / total_revenue * 100) if total_revenue > 0 else 0.0
+        
+        # Определяем название периода для ответа
+        period_names = {
+            "today": "за сегодня",
+            "week": "за неделю", 
+            "month": "за месяц",
+            "all": "за всё время",
+            "custom": "за выбранный период"
+        }
+        
+        result_data = {
+            "ton_profit": round(ton_profit, 2),
+            "stars_profit": round(stars_profit, 2), 
+            "total_profit": round(total_profit, 2),
+            "margin_percentage": round(margin_percentage, 2),
+            "period": period_names.get(period, period)
+        }
+        
+        logger.info(f"📊 Profit stats result: {result_data}")
+        return result_data
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting profit stats: {e}", exc_info=True)
+        return ProfitStatsResponse(
+            ton_profit=0.0,
+            stars_profit=0.0,
+            total_profit=0.0,
+            margin_percentage=0.0,
+            period="ошибка"
+        )
+
+@app.get("/api/admin/referral-leaders")
+async def get_admin_referral_leaders(
+    limit: int = 10,
+    sort_by: str = "referral_count",  # "referral_count" или "total_earnings"
+    storage: Storage = Depends(get_storage)
+):
+    """Получить топ-лидеров рефералов"""
+    try:
+        logger.info(f"🏆 Getting top {limit} referral leaders, sorted by: {sort_by}")
+        
+        # Запрос для подсчета рефералов и заработка
+        if sort_by == "total_earnings":
+            # Сортировка по общему заработку от рефералов
+            query = select(
+                User.id,
+                User.username,
+                User.first_name,
+                User.last_name,
+                User.telegram_id,
+                func.count(distinct(User.c.id)).label("referral_count"),
+                func.coalesce(func.sum(Transaction.amount), 0).label("total_earnings")
+            ).select_from(
+                User.join(
+                    select(User.id.label("referral_id")).where(User.referred_by == User.c.id).alias("referrals"),
+                    User.id == "referrals.c.referral_id",
+                    isouter=True
+                ).join(
+                    Transaction,
+                    and_(
+                        Transaction.user_id == User.id,
+                        Transaction.type == "referral_bonus",
+                        Transaction.status == "completed"
+                    ),
+                    isouter=True
+                )
+            ).group_by(User.id, User.username, User.first_name, User.last_name, User.telegram_id)\
+             .having(func.count(distinct(User.c.id)) > 0)\
+             .order_by(desc("total_earnings"))\
+             .limit(limit)
+        else:
+            # Сортировка по количеству рефералов (по умолчанию)
+            # Подзапрос для подсчета рефералов
+            referral_counts = select(
+                User.referred_by.label("referrer_id"),
+                func.count(User.id).label("referral_count")
+            ).where(User.referred_by.isnot(None))\
+             .group_by(User.referred_by)\
+             .subquery()
+            
+            # Подзапрос для подсчета заработка от рефералов
+            referral_earnings = select(
+                Transaction.user_id,
+                func.coalesce(func.sum(Transaction.amount), 0).label("total_earnings")
+            ).where(
+                and_(
+                    Transaction.type == "referral_bonus",
+                    Transaction.status == "completed"
+                )
+            ).group_by(Transaction.user_id).subquery()
+            
+            # Основной запрос
+            query = select(
+                User.id,
+                User.username,
+                User.first_name,
+                User.last_name,
+                User.telegram_id,
+                func.coalesce(referral_counts.c.referral_count, 0).label("referral_count"),
+                func.coalesce(referral_earnings.c.total_earnings, 0).label("total_earnings")
+            ).select_from(
+                User.join(
+                    referral_counts,
+                    User.id == referral_counts.c.referrer_id
+                ).join(
+                    referral_earnings,
+                    User.id == referral_earnings.c.user_id,
+                    isouter=True
+                )
+            ).order_by(desc(referral_counts.c.referral_count))\
+             .limit(limit)
+
+        result = await storage.db.execute(query)
+        leaders_data = result.all()
+        
+        # Формируем список лидеров
+        leaders = []
+        for i, row in enumerate(leaders_data, 1):
+            # Формируем имя пользователя
+            display_name = row.username
+            if not display_name:
+                if row.first_name:
+                    display_name = row.first_name
+                    if row.last_name:
+                        display_name += f" {row.last_name}"
+                else:
+                    display_name = f"User_{row.telegram_id[-4:]}"  # Последние 4 цифры ID
+                    
+            leaders.append({
+                "id": row.id,
+                "username": display_name,
+                "referral_count": int(row.referral_count or 0),
+                "total_earnings": int(row.total_earnings or 0),
+                "rank": i
+            })
+        
+        logger.info(f"🏆 Found {len(leaders)} referral leaders")
+        return {
+            "success": True,
+            "leaders": leaders,
+            "total_count": len(leaders),
+            "sort_by": sort_by
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting referral leaders: {e}", exc_info=True)
+        return {
+            "success": False,
+            "leaders": [],
+            "total_count": 0,
+            "sort_by": sort_by,
+            "error": str(e)
+        }
+
+@app.get("/api/admin/sales-chart")
+async def get_admin_sales_chart(
+    days: int = 30,
+    storage: Storage = Depends(get_storage)
+):
+    """Получить данные для графика продаж по дням"""
+    try:
+        logger.info(f"📈 Getting sales chart data for last {days} days")
+        
+        # Определяем период
+        today = datetime.utcnow().date()
+        start_date = today - timedelta(days=days-1)  # -1 чтобы включить сегодня
+        
+        # Запрос данных по дням
+        sales_by_day = {}
+        
+        # Инициализируем все дни нулями
+        for i in range(days):
+            current_date = start_date + timedelta(days=i)
+            sales_by_day[current_date.strftime('%Y-%m-%d')] = {
+                'date': current_date,
+                'sales': 0.0,
+                'count': 0
+            }
+        
+        # Запрос транзакций за период
+        query = select(
+            func.date(Transaction.created_at).label("date"),
+            func.sum(Transaction.rub_amount).label("total_sales"),
+            func.count(Transaction.id).label("transaction_count")
+        ).where(
+            and_(
+                Transaction.status == "completed",
+                Transaction.type.in_(["buy_stars", "buy_ton", "purchase"]),
+                Transaction.created_at >= datetime.combine(start_date, datetime.min.time()),
+                Transaction.rub_amount.isnot(None)
+            )
+        ).group_by(func.date(Transaction.created_at))\
+         .order_by(func.date(Transaction.created_at))
+        
+        result = await storage.db.execute(query)
+        daily_sales = result.all()
+        
+        # Обновляем данные реальными значениями
+        for row in daily_sales:
+            date_str = row.date.strftime('%Y-%m-%d')
+            if date_str in sales_by_day:
+                sales_by_day[date_str].update({
+                    'sales': float(row.total_sales or 0),
+                    'count': int(row.transaction_count or 0)
+                })
+        
+        # Формируем итоговый массив
+        chart_data = []
+        month_names = ["", "янв", "фев", "мар", "апр", "май", "июн",
+                      "июл", "авг", "сен", "окт", "ноя", "дек"]
+        
+        for date_str in sorted(sales_by_day.keys()):
+            data = sales_by_day[date_str]
+            date_obj = data['date']
+            
+            # Формат для графика: "01 янв" или "01.02"
+            if days <= 30:
+                formatted_date = f"{date_obj.day:02d}.{date_obj.month:02d}"
+            else:
+                formatted_date = f"{date_obj.day} {month_names[date_obj.month]}"
+            
+            chart_data.append({
+                "date": date_str,
+                "sales": round(data['sales'], 2),
+                "count": data['count'],
+                "formatted_date": formatted_date
+            })
+        
+        logger.info(f"📈 Generated chart data for {len(chart_data)} days")
+        
+        # Считаем итоговые метрики
+        total_sales = sum(item['sales'] for item in chart_data)
+        total_transactions = sum(item['count'] for item in chart_data)
+        avg_daily_sales = total_sales / days if days > 0 else 0
+        
+        return {
+            "success": True,
+            "chart_data": chart_data,
+            "period_days": days,
+            "total_sales": round(total_sales, 2),
+            "total_transactions": total_transactions,
+            "avg_daily_sales": round(avg_daily_sales, 2)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting sales chart data: {e}", exc_info=True)
+        # Возвращаем пустые данные в случае ошибки
+        mock_data = []
+        for i in range(days):
+            date = (datetime.utcnow().date() - timedelta(days=days-1-i))
+            mock_data.append({
+                "date": date.strftime('%Y-%m-%d'),
+                "sales": 0.0,
+                "count": 0,
+                "formatted_date": f"{date.day:02d}.{date.month:02d}"
+            })
+            
+        return {
+            "success": False,
+            "chart_data": mock_data,
+            "period_days": days,
+            "total_sales": 0.0,
+            "total_transactions": 0,
+            "avg_daily_sales": 0.0,
+            "error": str(e)
+        }
+
+# Дополнительный endpoint для обновления кэша статистики прибыли
+@app.post("/api/admin/profit-stats/refresh")
+async def refresh_profit_stats(storage: Storage = Depends(get_storage)):
+    """Принудительное обновление кэша статистики прибыли"""
+    try:
+        logger.info("🔄 Refreshing profit stats cache...")
+        
+        # Очищаем кэш если есть
+        if hasattr(storage, '_profit_stats_cache'):
+            delattr(storage, '_profit_stats_cache')
+        
+        # Получаем свежую статистику
+        fresh_stats = await get_admin_profit_stats(period="all", storage=storage)
+        
+        return {
+            "success": True,
+            "message": "Кэш статистики прибыли обновлен",
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error refreshing profit stats: {e}")
+        return {
+            "success": False,
+            "message": "Ошибка обновления кэша",
+            "error": str(e)
+        }
+
+
+
 # Функция уведомлений (заглушка)
 async def notify_users_new_task(task):
     """Уведомление пользователей о новом задании"""

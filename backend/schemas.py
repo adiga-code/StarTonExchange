@@ -93,6 +93,26 @@ class TransactionHistoryResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ProfitStatsResponse(BaseModel):
+    ton_profit: float
+    stars_profit: float
+    total_profit: float
+    margin_percentage: float
+    period: str
+
+class ReferralLeaderItem(BaseModel):
+    id: str
+    username: str
+    referral_count: int
+    total_earnings: int
+    rank: int
+
+class SalesChartItem(BaseModel):
+    date: str
+    sales: float
+    count: int
+    formatted_date: str
+
 # Completed Tasks History schemas
 class CompletedTaskHistoryItem(BaseModel):
     id: str

@@ -53,23 +53,26 @@ type AdminStats = {
 type PeriodFilter = 'today' | 'week' | 'month' | 'all' | 'custom';
 
 type ProfitStats = {
-  tonProfit: number;
-  starsProfit: number;
-  totalProfit: number;
-  marginPercentage: number;
+  ton_profit: number;
+  stars_profit: number;
+  total_profit: number;
+  margin_percentage: number;
+  period?: string;
 };
 
 type ReferralLeader = {
   id: string;
   username: string;
-  referralCount: number;
-  totalEarnings: number;
+  referral_count: number;
+  total_earnings: number;
+  rank: number;
 };
 
 type SalesData = {
   date: string;
   sales: number;
   count: number;
+  formatted_date: string;
 };
 
 type CurrentSettings = {
@@ -176,50 +179,51 @@ export default function AdminPage(): JSX.Element {
     },
   });
 
-  // Новые API запросы для расширенной аналитики (пока заглушки)
+  // API запросы для расширенной аналитики
   const { data: profitStats, isLoading: isProfitLoading } = useQuery({
     queryKey: ["/api/admin/profit-stats", selectedPeriod, customDateFrom, customDateTo],
     queryFn: async () => {
-      // TODO: Реализовать API endpoint
-      const mockData: ProfitStats = {
-        tonProfit: 125000,
-        starsProfit: 85000, 
-        totalProfit: 210000,
-        marginPercentage: 15.5
-      };
-      return mockData;
-    },
-    enabled: false // Отключено пока не реализован endpoint
+      const { from, to } = getPeriodDates(selectedPeriod);
+      const params = new URLSearchParams({
+        period: selectedPeriod
+      });
+      
+      if (from && to) {
+        params.append('date_from', from.toISOString());
+        params.append('date_to', to.toISOString());
+      }
+      
+      const response = await fetch(`/api/admin/profit-stats?${params}`);
+      if (!response.ok) throw new Error('Failed to fetch profit stats');
+      return response.json() as Promise<ProfitStats>;
+    }
   });
 
-  const { data: referralLeaders, isLoading: isLeadersLoading } = useQuery({
+  const { data: referralLeadersResponse, isLoading: isLeadersLoading } = useQuery({
     queryKey: ["/api/admin/referral-leaders"],
     queryFn: async () => {
-      // TODO: Реализовать API endpoint
-      const mockData: ReferralLeader[] = Array.from({ length: 10 }, (_, i) => ({
-        id: `user-${i}`,
-        username: `Пользователь ${i + 1}`,
-        referralCount: Math.floor(Math.random() * 50) + 10,
-        totalEarnings: Math.floor(Math.random() * 10000) + 1000
-      }));
-      return mockData;
-    },
-    enabled: false // Отключено пока не реализован endpoint
+      const response = await fetch("/api/admin/referral-leaders?limit=10&sort_by=referral_count");
+      if (!response.ok) throw new Error('Failed to fetch referral leaders');
+      return response.json();
+    }
   });
 
-  const { data: salesChartData, isLoading: isChartLoading } = useQuery({
+  const { data: salesChartResponse, isLoading: isChartLoading } = useQuery({
     queryKey: ["/api/admin/sales-chart", selectedPeriod],
     queryFn: async () => {
-      // TODO: Реализовать API endpoint
-      const mockData: SalesData[] = Array.from({ length: 30 }, (_, i) => ({
-        date: format(subDays(new Date(), 29 - i), 'dd.MM'),
-        sales: Math.floor(Math.random() * 50000) + 10000,
-        count: Math.floor(Math.random() * 20) + 5
-      }));
-      return mockData;
-    },
-    enabled: false // Отключено пока не реализован endpoint
+      const days = selectedPeriod === 'week' ? 7 : 
+                   selectedPeriod === 'month' ? 30 : 
+                   selectedPeriod === 'today' ? 7 : 30; // Минимум неделя для графика
+      
+      const response = await fetch(`/api/admin/sales-chart?days=${days}`);
+      if (!response.ok) throw new Error('Failed to fetch sales chart data');
+      return response.json();
+    }
   });
+
+  // Извлекаем данные из ответов API
+  const referralLeaders = referralLeadersResponse?.leaders || [];
+  const salesChartData = salesChartResponse?.chart_data || [];
 
   // Мутации
   const updateSettingsMutation = useMutation({
@@ -308,9 +312,26 @@ export default function AdminPage(): JSX.Element {
     });
   };
 
-  const refreshProfitStats = () => {
-    queryClient.invalidateQueries({ queryKey: ["/api/admin/profit-stats"] });
-    toast({ title: "Статистика прибыли обновлена" });
+  const refreshProfitStats = async () => {
+    try {
+      const response = await fetch("/api/admin/profit-stats/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      
+      if (response.ok) {
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/profit-stats"] });
+        toast({ title: "Статистика прибыли обновлена" });
+      } else {
+        throw new Error('Failed to refresh');
+      }
+    } catch (error) {
+      toast({ 
+        title: "Ошибка обновления", 
+        description: "Не удалось обновить статистику",
+        variant: "destructive" 
+      });
+    }
   };
 
   // Вычисляемые значения
@@ -506,19 +527,43 @@ export default function AdminPage(): JSX.Element {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-white dark:bg-[#0E0E10] rounded-lg p-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">TON прибыль</p>
-              <p className="text-xl font-bold text-blue-600">₽{profitStats?.tonProfit.toLocaleString() || "0"}</p>
+              <p className="text-xl font-bold text-blue-600">
+                {isProfitLoading ? (
+                  <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
+                ) : (
+                  `₽${profitStats?.ton_profit?.toLocaleString() || "0"}`
+                )}
+              </p>
             </div>
             <div className="bg-white dark:bg-[#0E0E10] rounded-lg p-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">Stars прибыль</p>
-              <p className="text-xl font-bold text-yellow-600">₽{profitStats?.starsProfit.toLocaleString() || "0"}</p>
+              <p className="text-xl font-bold text-yellow-600">
+                {isProfitLoading ? (
+                  <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
+                ) : (
+                  `₽${profitStats?.stars_profit?.toLocaleString() || "0"}`
+                )}
+              </p>
             </div>
             <div className="bg-white dark:bg-[#0E0E10] rounded-lg p-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">Общая прибыль</p>
-              <p className="text-xl font-bold text-green-600">₽{profitStats?.totalProfit.toLocaleString() || "0"}</p>
+              <p className="text-xl font-bold text-green-600">
+                {isProfitLoading ? (
+                  <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
+                ) : (
+                  `₽${profitStats?.total_profit?.toLocaleString() || "0"}`
+                )}
+              </p>
             </div>
             <div className="bg-white dark:bg-[#0E0E10] rounded-lg p-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">Маржинальность</p>
-              <p className="text-xl font-bold text-purple-600">{profitStats?.marginPercentage || "0"}%</p>
+              <p className="text-xl font-bold text-purple-600">
+                {isProfitLoading ? (
+                  <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
+                ) : (
+                  `${profitStats?.margin_percentage || "0"}%`
+                )}
+              </p>
             </div>
           </div>
         </motion.div>
@@ -590,33 +635,40 @@ export default function AdminPage(): JSX.Element {
                 className="overflow-hidden"
               >
                 <div className="space-y-2">
-                  {referralLeaders?.map((leader, index) => (
-                    <div key={leader.id} className="flex items-center justify-between bg-white dark:bg-[#0E0E10] rounded-lg p-3">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-8 h-8 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                          {index + 1}
+                  {isLeadersLoading ? (
+                    // Скелетон загрузки
+                    Array.from({ length: 10 }, (_, i) => (
+                      <div key={i} className="flex items-center justify-between bg-white dark:bg-[#0E0E10] rounded-lg p-3">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse"></div>
+                          <div>
+                            <div className="h-4 bg-gray-200 rounded w-24 animate-pulse mb-1"></div>
+                            <div className="h-3 bg-gray-200 rounded w-16 animate-pulse"></div>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium">{leader.username}</p>
-                          <p className="text-sm text-gray-500">{leader.referralCount} рефералов</p>
-                        </div>
+                        <div className="h-6 bg-gray-200 rounded w-20 animate-pulse"></div>
                       </div>
-                      <Badge variant="secondary">
-                        {leader.totalEarnings.toLocaleString()} ⭐
-                      </Badge>
-                    </div>
-                  )) || Array.from({ length: 10 }, (_, i) => (
-                    <div key={i} className="flex items-center justify-between bg-white dark:bg-[#0E0E10] rounded-lg p-3">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse"></div>
-                        <div>
-                          <div className="h-4 bg-gray-200 rounded w-24 animate-pulse mb-1"></div>
-                          <div className="h-3 bg-gray-200 rounded w-16 animate-pulse"></div>
+                    ))
+                  ) : referralLeaders?.length > 0 ? (
+                    referralLeaders.map((leader, index) => (
+                      <div key={leader.id} className="flex items-center justify-between bg-white dark:bg-[#0E0E10] rounded-lg p-3">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-8 h-8 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                            {leader.rank || index + 1}
+                          </div>
+                          <div>
+                            <p className="font-medium">{leader.username}</p>
+                            <p className="text-sm text-gray-500">{leader.referral_count} рефералов</p>
+                          </div>
                         </div>
+                        <Badge variant="secondary">
+                          {leader.total_earnings.toLocaleString()} ⭐
+                        </Badge>
                       </div>
-                      <div className="h-6 bg-gray-200 rounded w-20 animate-pulse"></div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-center text-gray-500 py-8">Лидеров нет</p>
+                  )}
                 </div>
               </motion.div>
             )}
