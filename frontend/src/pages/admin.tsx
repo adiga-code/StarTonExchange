@@ -25,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";  // ✅ ДОБАВЛЕН ИМПОРТ
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -84,6 +85,9 @@ type CurrentSettings = {
   referral_prefix?: string;
   referral_bonus_percentage?: string | number;
   referral_registration_bonus?: string | number;
+  // ✅ ДОБАВЛЕНЫ TADDY ТИПЫ
+  taddy_enabled?: string;
+  taddy_pub_id?: string;
 };
 
 export default function AdminPage(): JSX.Element {
@@ -97,6 +101,10 @@ export default function AdminPage(): JSX.Element {
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
   const [referralRegistrationBonus, setReferralRegistrationBonus] = useState<string>("");
   const [showTransactions, setShowTransactions] = useState<boolean>(false);
+
+  // ✅ ДОБАВЛЕНЫ TADDY СОСТОЯНИЯ
+  const [taddyEnabled, setTaddyEnabled] = useState<boolean>(false);
+  const [taddyPubId, setTaddyPubId] = useState<string>("");
 
   // Новые состояния для аналитики
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodFilter>('all');
@@ -262,6 +270,10 @@ export default function AdminPage(): JSX.Element {
       setReferralPrefix(String(currentSettings.referral_prefix || "ref"));
       setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, "10"));
       setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
+      
+      // ✅ ДОБАВЛЕНА ЗАГРУЗКА TADDY НАСТРОЕК
+      setTaddyEnabled(currentSettings.taddy_enabled === "true");
+      setTaddyPubId(String(currentSettings.taddy_pub_id || ""));
     }
   }, [currentSettings]);
 
@@ -301,6 +313,9 @@ export default function AdminPage(): JSX.Element {
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
       referral_bonus_percentage: referralBonusPercentage,
+      // ✅ ДОБАВЛЕНЫ TADDY НАСТРОЙКИ
+      taddy_enabled: taddyEnabled,
+      taddy_pub_id: taddyPubId.trim() || undefined,
     });
   };
 
@@ -746,7 +761,7 @@ export default function AdminPage(): JSX.Element {
                 className="w-full"
                 disabled={updateSettingsMutation.isPending}
               >
-                {updateSettingsMutation.isPending ? "Обновляется..." : "Обновить цены"}
+                {updateSettingsMutation.isPending ? "Обновляется..." : "Обновить настройки"}
               </Button>
             </div>
           </div>
@@ -789,6 +804,86 @@ export default function AdminPage(): JSX.Element {
                 placeholder="10"
               />
             </div>
+          </div>
+        </motion.div>
+
+        {/* ✅ НОВАЯ СЕКЦИЯ TADDY */}
+        <motion.div
+          className="bg-gray-50 dark:bg-[#1A1A1C] rounded-xl p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.85 }}
+        >
+          <h3 className="font-semibold mb-3 flex items-center">
+            <Activity className="w-4 h-4 text-indigo-500 mr-2" />
+            Интеграция Taddy
+          </h3>
+          
+          <div className="space-y-4">
+            {/* Переключатель включения Taddy */}
+            <div className="flex items-center justify-between p-4 bg-white dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-gray-700">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                </div>
+                <div>
+                  <Label htmlFor="taddy-enabled" className="text-sm font-medium cursor-pointer">
+                    Включить Taddy SDK
+                  </Label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Интеграция с системой обмена заданиями Taddy
+                  </p>
+                </div>
+              </div>
+              <Switch
+                id="taddy-enabled"
+                checked={taddyEnabled}
+                onCheckedChange={setTaddyEnabled}
+              />
+            </div>
+
+            {/* Pub ID (показываем только если включено) */}
+            <AnimatePresence>
+              {taddyEnabled && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <Label htmlFor="taddy-pub-id" className="text-sm font-medium">
+                        Taddy Publisher ID
+                      </Label>
+                      <Input
+                        id="taddy-pub-id"
+                        type="text"
+                        value={taddyPubId}
+                        onChange={(e) => setTaddyPubId(e.target.value)}
+                        placeholder="your-taddy-pub-id-here"
+                        className="mt-1"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        ID издателя из панели управления Taddy. Обязателен для работы интеграции.
+                      </p>
+                    </div>
+                    
+                    {taddyPubId && (
+                      <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                        <p className="text-sm text-green-700 dark:text-green-300 font-medium">
+                          Taddy настроен корректно
+                        </p>
+                        <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                          После сохранения настроек SDK будет инициализирован с ID: <code className="bg-green-100 dark:bg-green-800 px-1 rounded">{taddyPubId}</code>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </motion.div>
 
