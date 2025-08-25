@@ -12,8 +12,6 @@ COPY . .
 # Создаем директорию для базы данных
 RUN mkdir -p /app/data
 
-# Делаем start.sh исполнимым
-RUN chmod +x start.sh
 
 EXPOSE 8000
 
