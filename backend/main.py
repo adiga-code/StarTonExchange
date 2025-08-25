@@ -1445,7 +1445,7 @@ async def get_admin_profit_stats(
             margin_percentage=0.0,
             period="ошибка"
         )
-
+ 
 @app.get("/api/admin/referral-leaders")
 async def get_admin_referral_leaders(
     limit: int = 10,
