@@ -247,9 +247,19 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     },
   });
 
+  const { data: tonPriceData } = useQuery({
+    queryKey: ['/api/ton-price'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/ton-price');
+      return response.json();
+    },
+    refetchInterval: 60000, // Обновляем каждую минуту
+    staleTime: 30000,
+  });
+
   const prices = {
     stars: adminSettings?.stars_price ? parseFloat(adminSettings.stars_price) : 2.30,
-    ton: 0,
+    ton: tonPriceData?.price ? parseFloat(tonPriceData.price) : 0,
   };
 
  const quickBuyOptions = selectedCurrency === 'stars'
@@ -284,20 +294,22 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
            <p className="font-semibold">Telegram Stars</p>
            <p className="text-gray-600 dark:text-gray-400 text-xs">₽{prices.stars} за звезду</p>
          </motion.button>
-         <motion.button
-           onClick={() => handleCurrencySelect('ton')}
-           className={`p-4 rounded-xl border-2 transition-all ${selectedCurrency === 'ton'
-               ? 'border-[#4E7FFF] bg-[#4E7FFF]/10'
-               : 'border-gray-200 dark:border-white/10 hover:border-[#4E7FFF]/50'
-             }`}
-           whileHover={{ scale: 1.02 }}
-           whileTap={{ scale: 0.98 }}
-           disabled={isProcessing}
-         >
-           <Bitcoin className="w-8 h-8 text-[#4E7FFF] mx-auto mb-2" />
-           <p className="font-semibold">TON Coin</p>
-           <p className="text-gray-600 dark:text-gray-400 text-xs">₽{prices.ton} за TON</p>
-         </motion.button>
+          <motion.button
+            onClick={() => handleCurrencySelect('ton')}
+            className={`p-4 rounded-xl border-2 transition-all ${selectedCurrency === 'ton'
+                ? 'border-[#4E7FFF] bg-[#4E7FFF]/10'
+                : 'border-gray-200 dark:border-white/10 hover:border-[#4E7FFF]/50'
+              }`}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            disabled={isProcessing}
+          >
+            <div className="w-8 h-8 text-blue-500 mx-auto mb-2 font-bold text-lg">₿</div>
+            <p className="font-semibold">TON Coin</p>
+            <p className="text-gray-600 dark:text-gray-400 text-xs">
+              {tonPriceData?.price ? `₽${parseFloat(tonPriceData.price).toFixed(2)} за TON` : 'Загрузка...'}
+            </p>
+          </motion.button>
        </div>
      </motion.div>
 

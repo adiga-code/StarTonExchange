@@ -814,47 +814,67 @@ async def get_admin_stats(storage: Storage = Depends(get_storage)):
         logger.error(f"Error getting admin stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to get admin stats")
 
+@app.get("/api/ton-price")
+async def get_ton_price(storage: Storage = Depends(get_storage)):
+    """Получить текущую цену TON в рублях"""
+    try:
+        price = await ton_price_service.get_current_ton_price_rub(storage)
+        return {"price": f"{price:.2f}"}
+    except Exception as e:
+        logger.error(f"Error getting TON price: {e}")
+        # Возвращаем fallback цену в случае ошибки
+        fallback_price = await storage.get_cached_setting("ton_fallback_price")
+        fallback = float(fallback_price) if fallback_price and fallback_price.strip() else 420.0
+        return {"price": f"{fallback:.2f}"}
+
 @app.put("/api/admin/settings")
 async def update_admin_settings(
     settings: AdminSettingsUpdate,
     storage: Storage = Depends(get_storage)
 ):
     try:
-        # ✅ ДОБАВЬ ЭТО ЛОГИРОВАНИЕ:
-        logger.info(f"🔥 Received settings: {settings}")
-        logger.info(f"🔥 stars_price: '{settings.stars_price}' (type: {type(settings.stars_price)})")
-        logger.info(f"🔥 ton_price: '{settings.ton_price}' (type: {type(settings.ton_price)})")
-        logger.info(f"🔥 stars_price bool: {bool(settings.stars_price)}")
-        logger.info(f"🔥 ton_price bool: {bool(settings.ton_price)}")
+        logger.info(f"🔥 Received settings update: {settings}")
         
+        # Обновляем только те настройки, которые переданы
         if settings.stars_price:
             logger.info(f"✅ Updating stars_price to: {settings.stars_price}")
             await storage.update_setting("stars_price", settings.stars_price)
-        else:
-            logger.info(f"❌ Skipping stars_price (value: '{settings.stars_price}')")
-        if settings.stars_price:
-            await storage.update_setting("stars_price", settings.stars_price)
-        # if settings.markup_percentage:
-        #     await storage.update_setting("markup_percentage", settings.markup_percentage)
+            
         if settings.bot_base_url:
+            logger.info(f"✅ Updating bot_base_url to: {settings.bot_base_url}")
             await storage.update_setting("bot_base_url", settings.bot_base_url)
+            
         if settings.referral_prefix:
+            logger.info(f"✅ Updating referral_prefix to: {settings.referral_prefix}")
             await storage.update_setting("referral_prefix", settings.referral_prefix)
+            
         if settings.referral_bonus_percentage:
+            logger.info(f"✅ Updating referral_bonus_percentage to: {settings.referral_bonus_percentage}")
             await storage.update_setting("referral_bonus_percentage", settings.referral_bonus_percentage)
+            
         if settings.referral_registration_bonus:
-            await storage.update_setting("referral_registration_bonus", settings.referral_registration_bonus)
             logger.info(f"✅ Updating referral_registration_bonus to: {settings.referral_registration_bonus}")
+            await storage.update_setting("referral_registration_bonus", settings.referral_registration_bonus)
+            
+        # TON настройки
         if settings.ton_markup_percentage:
+            logger.info(f"✅ Updating ton_markup_percentage to: {settings.ton_markup_percentage}")
             await storage.update_setting("ton_markup_percentage", settings.ton_markup_percentage)
+            
         if settings.ton_price_cache_minutes:
+            logger.info(f"✅ Updating ton_price_cache_minutes to: {settings.ton_price_cache_minutes}")
             await storage.update_setting("ton_price_cache_minutes", settings.ton_price_cache_minutes)
+            
         if settings.ton_fallback_price:
+            logger.info(f"✅ Updating ton_fallback_price to: {settings.ton_fallback_price}")
             await storage.update_setting("ton_fallback_price", settings.ton_fallback_price)
+        
+        logger.info("✅ All settings updated successfully")
         return {"success": True}
+        
     except Exception as e:
-        logger.error(f"Error updating settings: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update settings")
+        logger.error(f"❌ Error updating settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}")
 
 
 def verify_task_admin(token: str) -> bool:
@@ -1099,6 +1119,61 @@ async def get_admin_settings(storage: Storage = Depends(get_storage)):
         "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage"),
     }
 
+@app.get("/api/admin/ton-diagnostics")
+async def ton_diagnostics(storage: Storage = Depends(get_storage)):
+    """Диагностика TON Price Service"""
+    try:
+        # Получаем настройки
+        cache_minutes = await storage.get_cached_setting("ton_price_cache_minutes")
+        markup = await storage.get_cached_setting("ton_markup_percentage") 
+        fallback = await storage.get_cached_setting("ton_fallback_price")
+        
+        # Статус сервиса
+        service_status = {
+            "last_price": ton_price_service.last_price,
+            "last_update": ton_price_service.last_update.isoformat() if ton_price_service.last_update else None,
+            "settings": {
+                "cache_minutes": cache_minutes,
+                "markup_percentage": markup,
+                "fallback_price": fallback
+            }
+        }
+        
+        # Тестовый запрос цены
+        current_price = await ton_price_service.get_current_ton_price_rub(storage)
+        
+        return {
+            "success": True,
+            "current_price": current_price,
+            "service_status": service_status
+        }
+        
+    except Exception as e:
+        logger.error(f"TON diagnostics error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "service_status": {
+                "last_price": ton_price_service.last_price,
+                "last_update": ton_price_service.last_update.isoformat() if ton_price_service.last_update else None,
+            }
+        }
+
+@app.post("/api/admin/update-ton-price")
+async def force_update_ton_price(storage: Storage = Depends(get_storage)):
+    """Принудительно обновить цену TON"""
+    try:
+        new_price = await ton_price_service.force_update_price(storage)
+        logger.info(f"✅ TON price manually updated: {new_price:.2f} RUB")
+        return {
+            "success": True,
+            "new_price": f"{new_price:.2f}",
+            "updated_at": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to update TON price: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update TON price: {str(e)}")
+
 @app.get("/api/config/referral")
 async def get_referral_config(storage: Storage = Depends(get_storage)):
     return {
@@ -1145,7 +1220,14 @@ async def startup_event():
     
     logger.info(f"FRAGMENT_SEED length: {len(fragment_seed) if fragment_seed else 'None'}")
     logger.info(f"FRAGMENT_COOKIE length: {len(fragment_cookies) if fragment_cookies else 'None'}")
-    
+    try:
+        logger.info("🚀 Initializing TON Price Service...")
+        async with AsyncSessionLocal() as session:
+            storage = Storage(session)
+            initial_price = await ton_price_service.get_current_ton_price_rub(storage)
+            logger.info(f"✅ TON Price Service initialized with price: {initial_price:.2f} RUB")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize TON Price Service: {e}")
     try:
         fragment_seed = os.getenv("FRAGMENT_SEED")
         fragment_cookies = os.getenv("FRAGMENT_COOKIE")

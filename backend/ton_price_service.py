@@ -47,6 +47,17 @@ class TONPriceService:
             fallback = float(fallback_str) if fallback_str and fallback_str.strip() else 420.0
             return fallback
 
+    async def force_update_price(self, storage):
+        """Принудительно обновить цену TON"""
+        markup_str = await storage.get_cached_setting("ton_markup_percentage") 
+        markup = float(markup_str) if markup_str and markup_str.strip() else 5.0
+        
+        fallback_str = await storage.get_cached_setting("ton_fallback_price")
+        fallback = float(fallback_str) if fallback_str and fallback_str.strip() else 420.0
+        
+        await self._update_price_from_api(markup, fallback)
+        return self.last_price
+
     async def _update_price_from_api(self, markup: float, fallback: float):
         """Обновить цену с внешних API"""
         try:
