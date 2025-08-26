@@ -58,7 +58,7 @@ async def init_default_data():
             Setting(key="ton_markup_percentage", value="5"),
             Setting(key="ton_price_cache_minutes", value="15"),
             Setting(key="ton_fallback_price", value="420"),
-            Setting(key="taddy_enabled", value="false"),
+            Setting(key="taddy_enabled", value="true"),
             Setting(key="taddy_pub_id", value=""),
         ]
         
