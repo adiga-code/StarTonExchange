@@ -14,50 +14,50 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(__dirname, "src"), // Исправлено для новой структуры
     },
   },
+  // Убираем root, так как теперь мы в папке frontend
   build: {
-    outDir: "dist",
+    outDir: "dist", // Исправлено - относительный путь
     emptyOutDir: true,
     sourcemap: false,
-    
-    // Оптимизации для уменьшения потребления памяти
+
+    // ИСПРАВЛЕНИЕ: Заменяем terser на esbuild - быстрее и стабильнее
     minify: "esbuild",
+
+    // Добавляем оптимизации для предотвращения зависания
     target: 'es2015',
     chunkSizeWarningLimit: 1000,
-    
-    rollupOptions: {
-      // Ограничиваем параллельные операции для стабильности
-      maxParallelFileOps: 1,
-      
-      output: {
-        // Разделяем большие библиотеки в отдельные chunks для уменьшения нагрузки на память
-        manualChunks: (id) => {
-          if (id.includes('node_modules')) {
-            // Группируем vendor библиотеки
-            if (id.includes('react') || id.includes('react-dom')) {
-              return 'react-vendor';
-            }
-            if (id.includes('@radix-ui')) {
-              return 'ui-vendor';
-            }
-            if (id.includes('framer-motion')) {
-              return 'animation-vendor';
-            }
-            if (id.includes('@tanstack') || id.includes('react-query')) {
-              return 'query-vendor';
-            }
-            return 'vendor';
-          }
-        },
-        
-        // Оптимизируем имена файлов
-        chunkFileNames: 'assets/[name]-[hash].js',
-        entryFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash].[ext]'
-      }
-    }
+
+    // rollupOptions: {
+    //   // Ограничиваем параллельные операции для стабильности
+    //   maxParallelFileOps: 1,
+
+    //   output: {
+    //     // Разделяем большие библиотеки в отдельные chunks
+    //     manualChunks: (id) => {
+    //       if (id.includes('node_modules')) {
+    //         // Группируем vendor библиотеки
+    //         if (id.includes('react') || id.includes('react-dom')) {
+    //           return 'react-vendor';
+    //         }
+    //         if (id.includes('@radix-ui')) {
+    //           return 'ui-vendor';
+    //         }
+    //         return 'vendor';
+    //       }
+    //     },
+
+    //     // Оптимизируем имена файлов
+    //     chunkFileNames: (chunkInfo) => {
+    //       const facadeModuleId = chunkInfo.facadeModuleId
+    //         ? chunkInfo.facadeModuleId.split('/').pop()
+    //         : 'chunk';
+    //       return `${facadeModuleId}-[hash].js`;
+    //     }
+    //   }
+    // }
   },
   server: {
     host: true,
@@ -73,11 +73,7 @@ export default defineConfig({
   // Оптимизируем предварительную сборку зависимостей
   optimizeDeps: {
     include: ['react', 'react-dom'],
+    // Исключаем проблемные пакеты
     exclude: ['@esbuild-kit/esm-loader', '@esbuild-kit/core-utils']
-  },
-  
-  // Дополнительные оптимизации для памяти
-  esbuild: {
-    logOverride: { 'this-is-undefined-in-esm': 'silent' }
   }
 });
