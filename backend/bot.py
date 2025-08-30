@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, CallbackQuery
 from aiogram.filters import CommandStart
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
@@ -43,217 +43,144 @@ async def get_or_create_user(telegram_user, referrer_user_id=None) -> bool:
         # Проверяем, существует ли пользователь
         existing_user = await storage_instance.get_user_by_telegram_id(str(telegram_user.id))
         
-        if not existing_user:
-            # Создаем нового пользователя
-            user_data = UserCreate(
-                telegram_id=str(telegram_user.id),
-                username=telegram_user.username,
-                first_name=telegram_user.first_name,
-                last_name=telegram_user.last_name,
-                referred_by=referrer_user_id  # ВАЖНО: устанавливаем реферера
-            )
-            
-            try:
-                new_user = await storage_instance.create_user(user_data)
-                logger.info(f"Created new user: {new_user.id} (Telegram ID: {telegram_user.id})")
-                
-                # Если есть реферер, начисляем ему бонус за приглашение
-                if referrer_user_id:
-                    await storage_instance.process_referral_registration(referrer_user_id, new_user.id)
-                    logger.info(f"Processed referral registration bonus for referrer: {referrer_user_id}")
-                
-                return True
-            except Exception as e:
-                logger.error(f"Error creating user: {e}")
-                return False
-        else:
-            logger.info(f"User already exists: {existing_user.id} (Telegram ID: {telegram_user.id})")
-            return True
+        if existing_user:
+            return False  # Пользователь уже существует
+        
+        # Создаем нового пользователя
+        user_data = UserCreate(
+            telegram_id=str(telegram_user.id),
+            first_name=telegram_user.first_name,
+            last_name=telegram_user.last_name,
+            username=telegram_user.username,
+            referrer_user_id=referrer_user_id
+        )
+        
+        await storage_instance.create_user(user_data)
+        return True  # Новый пользователь создан
 
 @router.message(CommandStart())
 async def start_command(message: Message):
     """Handle /start command with referral support"""
     user = message.from_user
-    
-    # Извлекаем аргументы команды /start (реферальный код)
-    command_args = message.text.split()[1:] if message.text and len(message.text.split()) > 1 else []
     referrer_user_id = None
     
-    if command_args:
-        referral_param = command_args[0]
-        logger.info(f"Start command with parameter: {referral_param}")
-        
-        # Получаем префикс из настроек для проверки
-        async with AsyncSessionLocal() as session:
-            storage_instance = Storage(session)
-            prefix = await storage_instance.get_cached_setting("referral_prefix")
-            
-            # Проверяем, что параметр начинается с нашего префикса
-            if referral_param.startswith(prefix):
-                referral_code = referral_param[len(prefix):]
-                logger.info(f"Extracted referral code: {referral_code}")
-                
-                # Ищем пользователя-реферера по коду
-                referrer_user = await storage_instance.get_user_by_referral_code(referral_code)
-                if referrer_user:
-                    referrer_user_id = referrer_user.id
-                    logger.info(f"Found referrer: {referrer_user.telegram_id} for new user: {user.id}")
-                else:
-                    logger.warning(f"Referrer not found for code: {referral_code}")
+    # Проверяем наличие реферального кода
+    if message.text and len(message.text.split()) > 1:
+        start_param = message.text.split()[1]
+        if start_param.startswith('ref'):
+            referral_code = start_param[3:]  # Убираем префикс 'ref'
+            async with AsyncSessionLocal() as session:
+                storage_instance = Storage(session)
+                referrer = await storage_instance.get_user_by_referral_code(referral_code)
+                if referrer:
+                    referrer_user_id = referrer.id
     
-    # Создаем или получаем пользователя с реферером
-    user_created = await get_or_create_user(user, referrer_user_id)
+    # Создаем или получаем пользователя
+    is_new_user = await get_or_create_user(user, referrer_user_id)
     
-    if not user_created:
-        await message.answer("❌ Произошла ошибка при регистрации.")
-        return
+    welcome_text = "🎉 <b>Добро пожаловать в StarsGuru!</b>\n\n"
+    welcome_text += "💫 Покупайте Telegram Stars и TON для себя или других пользователей!\n\n"
     
-    # Формируем приветственное сообщение
-    welcome_text = "🎉 <b>Добро пожаловать в Stars Exchange!</b>\n\n"
-    welcome_text += "💫 Обменивайте Telegram Stars на TON и обратно с лучшими курсами!\n\n"
-    
-    if referrer_user_id:
+    if referrer_user_id and is_new_user:
         welcome_text += "🎁 <b>Вы пришли по реферальной ссылке!</b>\n"
-        welcome_text += "Ваш друг получит бонус за приглашение, а вы - за активность!\n\n"
+        welcome_text += "Ваш друг получит бонус за приглашение!\n\n"
     
-    welcome_text += "🚀 Нажмите кнопку ниже, чтобы начать:"
+    welcome_text += "🚀 Выберите действие:"
     
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🚀 Открыть Stars Exchange",
+                    text="🚀 Открыть StarsGuru",
                     web_app=WebAppInfo(url=WEBAPP_URL)
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="👥 Рефералы",
-                    callback_data="referrals"
-                ),
-                InlineKeyboardButton(
-                    text="💰 Баланс", 
-                    callback_data="balance"
+                    text="📄 Документы",
+                    callback_data="documents"
                 )
             ]
         ]
     )
     
     await message.answer(welcome_text, reply_markup=keyboard, parse_mode="HTML")
-        
-@router.message(F.text == "💰 Баланс")
-async def balance_command(message: Message):
-    """Handle balance inquiry"""
-    user = message.from_user
+
+@router.callback_query(F.data == "documents")
+async def documents_callback(callback_query: CallbackQuery):
+    """Handle documents button press"""
+    documents_text = """
+📄 <b>Юридические документы StarsGuru</b>
+
+Ознакомьтесь с документами, регулирующими использование платформы:
+    """
     
-    async with AsyncSessionLocal() as session:
-        storage_instance = Storage(session)
-        db_user = await storage_instance.get_user_by_telegram_id(str(user.id))
-        
-        if not db_user:
-            await message.answer("❌ Пользователь не найден. Отправьте /start для регистрации.")
-            return
-        
-        balance_text = f"""
-💰 <b>Ваш баланс:</b>
-
-⭐ Telegram Stars: <b>{db_user.stars_balance}</b>
-💎 TON Balance: <b>{db_user.ton_balance}</b>
-
-📊 <b>Статистика:</b>
-🎯 Заданий выполнено: <b>{db_user.tasks_completed}</b>
-👥 Рефералов: <b>{db_user.total_referral_earnings}</b>
-🏆 Всего заработано: <b>{db_user.total_stars_earned} звезд</b>
-        """
-        
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🚀 Открыть приложение",
-                        web_app=WebAppInfo(url=WEBAPP_URL)
-                    )
-                ]
-            ]
-        )
-        
-        await message.answer(balance_text, reply_markup=keyboard, parse_mode="HTML")
-
-@router.message(F.text == "📈 Задания")
-async def tasks_command(message: Message):
-    """Handle tasks inquiry"""
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🎯 Выполнить задания",
-                    web_app=WebAppInfo(url=f"{WEBAPP_URL}#tasks")
+                    text="🔒 Политика конфиденциальности",
+                    url="https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-08-30-42"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Пользовательское соглашение",
+                    url="https://telegra.ph/POLZOVATELSKOE-SOGLASHENIE-08-30-21"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📞 Контактные данные поддержки",
+                    url="https://telegra.ph/KONTAKTNYE-DANNYE-SLUZHBY-PODDERZHKI-08-30"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="back_to_main"
                 )
             ]
         ]
     )
     
-    tasks_text = """
-🎯 <b>Доступные задания:</b>
+    await callback_query.message.edit_text(
+        documents_text, 
+        reply_markup=keyboard, 
+        parse_mode="HTML"
+    )
+    await callback_query.answer()
 
-⭐ <b>Ежедневные:</b>
-• Ежедневный вход: +10 звезд
-
-🎁 <b>Социальные:</b>
-• Пригласить друга: +25 звезд
-• Подписаться на канал: +50 звезд
-
-💡 <b>Выполняйте задания каждый день и зарабатывайте больше звезд!</b>
-    """
+@router.callback_query(F.data == "back_to_main")
+async def back_to_main_callback(callback_query: CallbackQuery):
+    """Handle back to main menu"""
+    welcome_text = "🎉 <b>Добро пожаловать в StarsGuru!</b>\n\n"
+    welcome_text += "💫 Покупайте Telegram Stars и TON для себя или других пользователей!\n\n"
+    welcome_text += "🚀 Выберите действие:"
     
-    await message.answer(tasks_text, reply_markup=keyboard, parse_mode="HTML")
-
-@router.message(F.text == "👥 Рефералы")
-async def referrals_command(message: Message):
-    """Handle referrals inquiry"""
-    user = message.from_user
-    
-    async with AsyncSessionLocal() as session:
-        storage_instance = Storage(session)
-        db_user = await storage_instance.get_user_by_telegram_id(str(user.id))
-        
-        if not db_user:
-            await message.answer("❌ Пользователь не найден. Отправьте /start для регистрации.")
-            return
-        
-        storage_instance = Storage(session)
-        bot_url = await storage_instance.get_cached_setting("bot_base_url")
-        prefix = await storage_instance.get_cached_setting("referral_prefix")
-        referral_link = f"{bot_url}?start={prefix}{db_user.referral_code}"
-        
-        bonus_percent = await storage_instance.get_cached_setting("referral_bonus_percentage")
-        referrals_text = f"""
-👥 <b>Реферальная программа</b>
-
-💰 <b>Зарабатывайте {bonus_percent}% с каждой покупки друзей!</b>
-
-🔗 <b>Ваша реферальная ссылка:</b>
-<code>{referral_link}</code>
-
-📊 <b>Статистика:</b>
-👥 Приглашено друзей: <b>0</b>
-💰 Заработано с рефералов: <b>{db_user.total_referral_earnings} звезд</b>
-
-💡 <b>Поделитесь ссылкой с друзьями и зарабатывайте вместе!</b>
-        """
-        
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📤 Поделиться ссылкой",
-                        switch_inline_query=f"Попробуй этот крутой обменник Stars и TON! {referral_link}"
-                    )
-                ]
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🚀 Открыть StarsGuru",
+                    web_app=WebAppInfo(url=WEBAPP_URL)
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📄 Документы",
+                    callback_data="documents"
+                )
             ]
-        )
-        
-        await message.answer(referrals_text, reply_markup=keyboard, parse_mode="HTML")
+        ]
+    )
+    
+    await callback_query.message.edit_text(
+        welcome_text, 
+        reply_markup=keyboard, 
+        parse_mode="HTML"
+    )
+    await callback_query.answer()
 
 @router.message()
 async def default_handler(message: Message):
@@ -262,21 +189,31 @@ async def default_handler(message: Message):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🚀 Открыть Stars Exchange",
+                    text="🚀 Открыть StarsGuru",
                     web_app=WebAppInfo(url=WEBAPP_URL)
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📄 Документы",
+                    callback_data="documents"
                 )
             ]
         ]
     )
     
     await message.answer(
-        "👋 Используйте кнопку ниже для доступа к Stars Exchange:",
+        "👋 Используйте кнопки ниже для работы с платформой:",
         reply_markup=keyboard
     )
 
 async def main():
     """Main function to run the bot"""
     try:
+        # Initialize database
+        await init_db()
+        await init_default_data()
+        
         # Start polling
         logger.info("Starting bot...")
         await dp.start_polling(bot)
