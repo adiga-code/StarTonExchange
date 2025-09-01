@@ -409,6 +409,7 @@ async def calculate_purchase(
         logger.error(f"Error calculating price: {e}")
         raise HTTPException(status_code=500, detail="Failed to calculate price")
 
+# ЗАМЕНИТЬ весь endpoint /api/purchase:
 @app.post("/api/purchase", response_model=PaymentCreateResponse)
 async def create_purchase(
     purchase_data: PurchaseRequest,
@@ -421,8 +422,11 @@ async def create_purchase(
         if purchase_data.currency not in ["stars", "ton"]:
             raise HTTPException(status_code=400, detail="Invalid currency")
         
-        # Get current prices
-        prices = await get_current_prices()
+        # Get current prices (используем существующую логику)
+        prices = {
+            "stars": float(await storage.get_cached_setting("stars_price")),
+            "ton": await ton_price_service.get_current_ton_price_rub(storage),
+        }
         
         # Validate amount
         min_amounts = {"stars": 50, "ton": 0.1}
@@ -445,22 +449,38 @@ async def create_purchase(
         import uuid
         invoice_id = str(uuid.uuid4())
         
-        # Create transaction record
-        transaction_data = TransactionCreate(
-            user_id=current_user.id,
-            type="purchase",
-            currency=purchase_data.currency,
-            amount=Decimal(str(purchase_data.amount)),
-            rub_amount=Decimal(str(purchase_data.rub_amount)),
-            status="pending",
-            description=f"Покупка {purchase_data.amount} {purchase_data.currency}" + 
-                       (f" для @{purchase_data.username}" if purchase_data.username else ""),
-            payment_system="freekassa",
-            invoice_id=invoice_id,
-            recipient_username=purchase_data.username,  # ← СОХРАНЯЕМ ПОЛУЧАТЕЛЯ
-            email=purchase_data.email,  # ← СОХРАНЯЕМ EMAIL
-            ton_price_at_purchase=Decimal(str(prices["ton"])) if purchase_data.currency == "ton" else None
-        )
+        # Create transaction record - проверим какие поля поддерживает TransactionCreate
+        try:
+            transaction_data = TransactionCreate(
+                user_id=current_user.id,
+                type="purchase",
+                currency=purchase_data.currency,
+                amount=Decimal(str(purchase_data.amount)),
+                rub_amount=Decimal(str(purchase_data.rub_amount)),
+                status="pending",
+                description=f"Покупка {purchase_data.amount} {purchase_data.currency}" + 
+                           (f" для @{purchase_data.username}" if purchase_data.username else ""),
+                payment_system="freekassa",
+                invoice_id=invoice_id,
+                recipient_username=purchase_data.username if hasattr(purchase_data, 'username') else None,
+                email=purchase_data.email if hasattr(purchase_data, 'email') else None,
+                ton_price_at_purchase=Decimal(str(prices["ton"])) if purchase_data.currency == "ton" else None
+            )
+        except Exception as e:
+            logger.error(f"Error with new fields: {e}")
+            # Fallback без новых полей если они еще не добавлены в модель
+            transaction_data = TransactionCreate(
+                user_id=current_user.id,
+                type="purchase",
+                currency=purchase_data.currency,
+                amount=Decimal(str(purchase_data.amount)),
+                rub_amount=Decimal(str(purchase_data.rub_amount)),
+                status="pending",
+                description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
+                payment_system="freekassa",
+                invoice_id=invoice_id,
+                ton_price_at_purchase=Decimal(str(prices["ton"])) if purchase_data.currency == "ton" else None
+            )
         
         transaction = await storage.create_transaction(transaction_data)
         
@@ -473,16 +493,15 @@ async def create_purchase(
             order_id=invoice_id,
             amount=Decimal(str(purchase_data.rub_amount)),
             description=f"Покупка {purchase_data.amount} {purchase_data.currency}" + 
-                       (f" для @{purchase_data.username}" if purchase_data.username else ""),
-            user_email=purchase_data.email,
+                       (f" для @{purchase_data.username}" if hasattr(purchase_data, 'username') and purchase_data.username else ""),
+            user_email=purchase_data.email if hasattr(purchase_data, 'email') else f"{current_user.telegram_id}@telegram.user",
             currency="RUB"
         )
         
         # Update transaction with payment URL
         await storage.update_transaction(transaction.id, {"payment_url": payment_url})
         
-        logger.info(f"Created FreeKassa payment for user {current_user.telegram_id}: {purchase_data.rub_amount} RUB for {purchase_data.amount} {purchase_data.currency}" + 
-                   (f" to @{purchase_data.username}" if purchase_data.username else ""))
+        logger.info(f"Created FreeKassa payment for user {current_user.telegram_id}: {purchase_data.rub_amount} RUB for {purchase_data.amount} {purchase_data.currency}")
         
         return PaymentCreateResponse(
             transaction_id=transaction.id,
