@@ -113,7 +113,7 @@ class FreekassaPayment:
         self,
         order_id: str,
         amount: Decimal,
-        user_email: str,
+        user_email: Optional[str],
         user_ip: str,
         payment_method_id: int = 4,  # Default to VISA RUB
         currency: str = "RUB",

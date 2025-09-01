@@ -409,7 +409,6 @@ async def calculate_purchase(
         logger.error(f"Error calculating price: {e}")
         raise HTTPException(status_code=500, detail="Failed to calculate price")
 
-# ЗАМЕНИТЬ весь endpoint /api/purchase:
 @app.post("/api/purchase", response_model=PaymentCreateResponse)
 async def create_purchase(
     purchase_data: PurchaseRequest,
@@ -422,7 +421,7 @@ async def create_purchase(
         if purchase_data.currency not in ["stars", "ton"]:
             raise HTTPException(status_code=400, detail="Invalid currency")
         
-        # Get current prices (используем существующую логику)
+        # Get current prices
         prices = {
             "stars": float(await storage.get_cached_setting("stars_price")),
             "ton": await ton_price_service.get_current_ton_price_rub(storage),
@@ -449,42 +448,26 @@ async def create_purchase(
         import uuid
         invoice_id = str(uuid.uuid4())
         
-        # Create transaction record - проверим какие поля поддерживает TransactionCreate
-        try:
-            transaction_data = TransactionCreate(
-                user_id=current_user.id,
-                type="purchase",
-                currency=purchase_data.currency,
-                amount=Decimal(str(purchase_data.amount)),
-                rub_amount=Decimal(str(purchase_data.rub_amount)),
-                status="pending",
-                description=f"Покупка {purchase_data.amount} {purchase_data.currency}" + 
-                           (f" для @{purchase_data.username}" if purchase_data.username else ""),
-                payment_system="freekassa",
-                invoice_id=invoice_id,
-                recipient_username=purchase_data.username if hasattr(purchase_data, 'username') else None,
-                email=purchase_data.email if hasattr(purchase_data, 'email') else None,
-                ton_price_at_purchase=Decimal(str(prices["ton"])) if purchase_data.currency == "ton" else None
-            )
-        except Exception as e:
-            logger.error(f"Error with new fields: {e}")
-            # Fallback без новых полей если они еще не добавлены в модель
-            transaction_data = TransactionCreate(
-                user_id=current_user.id,
-                type="purchase",
-                currency=purchase_data.currency,
-                amount=Decimal(str(purchase_data.amount)),
-                rub_amount=Decimal(str(purchase_data.rub_amount)),
-                status="pending",
-                description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
-                payment_system="freekassa",
-                invoice_id=invoice_id,
-                ton_price_at_purchase=Decimal(str(prices["ton"])) if purchase_data.currency == "ton" else None
-            )
+        # Create transaction record (БЕЗ email)
+        transaction_data = TransactionCreate(
+            user_id=current_user.id,
+            type="purchase",
+            currency=purchase_data.currency,
+            amount=Decimal(str(purchase_data.amount)),
+            rub_amount=Decimal(str(purchase_data.rub_amount)),
+            status="pending",
+            description=f"Покупка {purchase_data.amount} {purchase_data.currency}" + 
+                       (f" для @{purchase_data.username}" if purchase_data.username else ""),
+            payment_system="freekassa",
+            invoice_id=invoice_id,
+            recipient_username=purchase_data.username,
+            # email НЕ передаем - пользователь введет на странице FreeKassa
+            ton_price_at_purchase=Decimal(str(prices["ton"])) if purchase_data.currency == "ton" else None
+        )
         
         transaction = await storage.create_transaction(transaction_data)
         
-        # Create payment URL with FreeKassa
+        # Create payment URL with FreeKassa (БЕЗ email)
         freekassa = get_freekassa()
         if not freekassa:
             raise HTTPException(status_code=500, detail="Payment system not configured")
@@ -493,8 +476,8 @@ async def create_purchase(
             order_id=invoice_id,
             amount=Decimal(str(purchase_data.rub_amount)),
             description=f"Покупка {purchase_data.amount} {purchase_data.currency}" + 
-                       (f" для @{purchase_data.username}" if hasattr(purchase_data, 'username') and purchase_data.username else ""),
-            user_email=purchase_data.email if hasattr(purchase_data, 'email') else f"{current_user.telegram_id}@telegram.user",
+                       (f" для @{purchase_data.username}" if purchase_data.username else ""),
+            # user_email НЕ передаем - пользователь сам введет на FreeKassa
             currency="RUB"
         )
         

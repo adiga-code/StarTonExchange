@@ -229,7 +229,6 @@ class PurchaseRequest(BaseModel):
     amount: float = Field(..., gt=0)
     rub_amount: float = Field(..., gt=0)
     username: Optional[str] = None  # ← ДОБАВЬ ЭТУ СТРОКУ
-    email: str = Field(..., min_length=5)
 
 class PurchaseResponse(BaseModel):
     transaction: TransactionResponse
