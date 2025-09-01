@@ -46,6 +46,8 @@ class TransactionCreate(BaseModel):
     rub_amount: Optional[Decimal] = None
     status: Optional[str] = "pending"
     description: Optional[str] = None
+    email: Optional[str] = None  # ДОБАВИТЬ
+    recipient_username: Optional[str] = None
     payment_system: Optional[str] = None
     payment_url: Optional[str] = None
     invoice_id: Optional[str] = None
@@ -60,6 +62,8 @@ class TransactionResponse(BaseModel):
     rub_amount: Optional[Decimal]
     status: str
     description: Optional[str]
+    email: Optional[str]  # ДОБАВИТЬ
+    recipient_username: Optional[str]
     payment_system: Optional[str]
     payment_url: Optional[str]
     invoice_id: Optional[str]
@@ -225,10 +229,24 @@ class PurchaseRequest(BaseModel):
     amount: float = Field(..., gt=0)
     rub_amount: float = Field(..., gt=0)
     username: Optional[str] = None  # ← ДОБАВЬ ЭТУ СТРОКУ
+    email: str = Field(..., min_length=5)
 
 class PurchaseResponse(BaseModel):
     transaction: TransactionResponse
     status: str
+
+class FreekassaWebhookData(BaseModel):
+    MERCHANT_ID: str
+    AMOUNT: str
+    intid: str
+    MERCHANT_ORDER_ID: str
+    P_EMAIL: str
+    P_PHONE: Optional[str] = None
+    CUR_ID: str
+    payer_account: Optional[str] = None
+    SIGN: str
+    us_field1: Optional[str] = None
+    us_field2: Optional[str] = None
 
 # Referral schemas
 class ReferralStats(BaseModel):

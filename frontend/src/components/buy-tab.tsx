@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SnakeCaseUser, User } from "@shared/schema";
-import { PaymentMethodModal } from "@/components/payment-method-modal";
+import { EmailModal } from "@/components/email-modal";
 
 interface BuyTabProps {
  user?: SnakeCaseUser;
@@ -49,7 +49,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
  const { hapticFeedback } = useTelegram();
  const queryClient = useQueryClient();
  const timeoutRef = useRef<NodeJS.Timeout>();
- const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+ const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
 
  const fetchUserPhoto = async (username: string) => {
    setIsLoadingPhoto(true);
@@ -110,19 +110,25 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
  });
 
  // Purchase mutation
- const purchaseMutation = useMutation({
-   mutationFn: async (data: { currency: string; amount: number; rub_amount: number }) => {
-     const response = await apiRequest('POST', '/api/purchase', data);
-     return response.json() as Promise<PaymentResponse>;
-   },
-   onSuccess: (paymentData) => {
-     window.open(paymentData.payment_url, '_blank');
-     pollPaymentStatus(paymentData.transaction_id);
-     toast({
-       title: "Переходим к оплате",
-       description: "Откройте новую вкладку для оплаты",
-     });
-   },
+  const purchaseMutation = useMutation({
+    mutationFn: async (data: { 
+      currency: string; 
+      amount: number; 
+      rub_amount: number; 
+      username?: string;  // ← ПРОВЕРИТЬ ЧТО ЕСТЬ
+      email: string;  // ← ДОБАВИТЬ
+    }) => {
+      const response = await apiRequest('POST', '/api/purchase', data);
+      return response.json() as Promise<PaymentResponse>;
+    },
+    onSuccess: (paymentData) => {
+      window.open(paymentData.payment_url, '_blank');
+      pollPaymentStatus(paymentData.transaction_id);
+      toast({
+        title: "Переходим к оплате",
+        description: "Откройте новую вкладку для оплаты FreeKassa",  // ← ИЗМЕНИТЬ ТЕКСТ
+      });
+    },
    onError: (error: any) => {
      console.error('Purchase error:', error);
      toast({
@@ -217,10 +223,28 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
    setAmount(quickAmount.toString());
  };
 
-  const handleOpenPaymentModal = () => {
+  // НАЙТИ handleOpenPaymentModal и ЗАМЕНИТЬ НА:
+  const handleOpenEmailModal = () => {
     if (!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing || !recipientUsername.trim()) return;
     hapticFeedback('light');
-    setIsPaymentModalOpen(true);
+    setIsEmailModalOpen(true);
+  };
+
+  // ДОБАВИТЬ новую функцию:
+  const handleConfirmEmail = async (email: string) => {
+    setIsEmailModalOpen(false);
+    hapticFeedback('medium');
+    try {
+      await purchaseMutation.mutateAsync({
+        currency: selectedCurrency,
+        amount: parseFloat(amount),
+        rub_amount: parseFloat(priceCalculation?.base_price || '0'),
+        username: userPhoto ? recipientUsername : undefined,  // ← ПЕРЕДАЕТСЯ ПОЛУЧАТЕЛЬ
+        email: email,  // ← ПЕРЕДАЕТСЯ EMAIL
+      });
+    } catch (error) {
+      // Error handling is done in onError callback
+    }
   };
 
   const handleSBPPayment = async () => {
@@ -482,29 +506,29 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
          )}
 
          {/* Purchase Button */}
-         <Button
-           onClick={handleOpenPaymentModal}
-           disabled={!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing || !recipientUsername.trim()}
-           className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white font-semibold py-3 transition-all disabled:opacity-50"
-           size="lg"
-         >
-           {isProcessing ? (
-             <>
-               <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
-               Ожидаем оплату...
-             </>
-           ) : purchaseMutation.isPending ? (
-             <>
-               <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
-               Создание платежа...
-             </>
-           ) : (
-             <>
-               <ExternalLink className="w-4 h-4 mr-2" />
-               Выбрать способ оплаты
-             </>
-           )}
-         </Button>
+        <Button
+          onClick={handleOpenEmailModal}  // ← ИЗМЕНИТЬ
+          disabled={!amount || parseFloat(amount) <= 0 || !priceCalculation || isProcessing || !recipientUsername.trim()}
+          className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white font-semibold py-3 transition-all disabled:opacity-50"
+          size="lg"
+        >
+          {isProcessing ? (
+            <>
+              <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
+              Ожидаем оплату...
+            </>
+          ) : purchaseMutation.isPending ? (
+            <>
+              <div className="animate-spin w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full" />
+              Создание платежа...
+            </>
+          ) : (
+            <>
+              <ExternalLink className="w-4 h-4 mr-2" />
+              Оплатить  {/* ← ИЗМЕНИТЬ ТЕКСТ */}
+            </>
+          )}
+        </Button>
        </div>
      </motion.div>
 
@@ -540,12 +564,12 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
      </motion.div>
      
      {/* Payment Method Modal */}
-     <PaymentMethodModal
-       isOpen={isPaymentModalOpen}
-       onClose={() => setIsPaymentModalOpen(false)}
-       onSelectSBP={handleSBPPayment}
-       isLoading={purchaseMutation.isPending || isProcessing}
-     />
+      <EmailModal
+        isOpen={isEmailModalOpen}
+        onClose={() => setIsEmailModalOpen(false)}
+        onConfirm={handleConfirmEmail}
+        isLoading={purchaseMutation.isPending || isProcessing}
+      />
    </div>
  );
 }

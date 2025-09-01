@@ -365,7 +365,7 @@ import asyncio
 import logging
 import os
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, CallbackQuery
 from aiogram.filters import CommandStart
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
@@ -406,217 +406,144 @@ async def get_or_create_user(telegram_user, referrer_user_id=None) -> bool:
         # Проверяем, существует ли пользователь
         existing_user = await storage_instance.get_user_by_telegram_id(str(telegram_user.id))
         
-        if not existing_user:
-            # Создаем нового пользователя
-            user_data = UserCreate(
-                telegram_id=str(telegram_user.id),
-                username=telegram_user.username,
-                first_name=telegram_user.first_name,
-                last_name=telegram_user.last_name,
-                referred_by=referrer_user_id  # ВАЖНО: устанавливаем реферера
-            )
-            
-            try:
-                new_user = await storage_instance.create_user(user_data)
-                logger.info(f"Created new user: {new_user.id} (Telegram ID: {telegram_user.id})")
-                
-                # Если есть реферер, начисляем ему бонус за приглашение
-                if referrer_user_id:
-                    await storage_instance.process_referral_registration(referrer_user_id, new_user.id)
-                    logger.info(f"Processed referral registration bonus for referrer: {referrer_user_id}")
-                
-                return True
-            except Exception as e:
-                logger.error(f"Error creating user: {e}")
-                return False
-        else:
-            logger.info(f"User already exists: {existing_user.id} (Telegram ID: {telegram_user.id})")
-            return True
+        if existing_user:
+            return False  # Пользователь уже существует
+        
+        # Создаем нового пользователя
+        user_data = UserCreate(
+            telegram_id=str(telegram_user.id),
+            first_name=telegram_user.first_name,
+            last_name=telegram_user.last_name,
+            username=telegram_user.username,
+            referrer_user_id=referrer_user_id
+        )
+        
+        await storage_instance.create_user(user_data)
+        return True  # Новый пользователь создан
 
 @router.message(CommandStart())
 async def start_command(message: Message):
     """Handle /start command with referral support"""
     user = message.from_user
-    
-    # Извлекаем аргументы команды /start (реферальный код)
-    command_args = message.text.split()[1:] if message.text and len(message.text.split()) > 1 else []
     referrer_user_id = None
     
-    if command_args:
-        referral_param = command_args[0]
-        logger.info(f"Start command with parameter: {referral_param}")
-        
-        # Получаем префикс из настроек для проверки
-        async with AsyncSessionLocal() as session:
-            storage_instance = Storage(session)
-            prefix = await storage_instance.get_cached_setting("referral_prefix")
-            
-            # Проверяем, что параметр начинается с нашего префикса
-            if referral_param.startswith(prefix):
-                referral_code = referral_param[len(prefix):]
-                logger.info(f"Extracted referral code: {referral_code}")
-                
-                # Ищем пользователя-реферера по коду
-                referrer_user = await storage_instance.get_user_by_referral_code(referral_code)
-                if referrer_user:
-                    referrer_user_id = referrer_user.id
-                    logger.info(f"Found referrer: {referrer_user.telegram_id} for new user: {user.id}")
-                else:
-                    logger.warning(f"Referrer not found for code: {referral_code}")
+    # Проверяем наличие реферального кода
+    if message.text and len(message.text.split()) > 1:
+        start_param = message.text.split()[1]
+        if start_param.startswith('ref'):
+            referral_code = start_param[3:]  # Убираем префикс 'ref'
+            async with AsyncSessionLocal() as session:
+                storage_instance = Storage(session)
+                referrer = await storage_instance.get_user_by_referral_code(referral_code)
+                if referrer:
+                    referrer_user_id = referrer.id
     
-    # Создаем или получаем пользователя с реферером
-    user_created = await get_or_create_user(user, referrer_user_id)
+    # Создаем или получаем пользователя
+    is_new_user = await get_or_create_user(user, referrer_user_id)
     
-    if not user_created:
-        await message.answer("❌ Произошла ошибка при регистрации.")
-        return
+    welcome_text = "🎉 <b>Добро пожаловать в StarsGuru!</b>\n\n"
+    welcome_text += "💫 Покупайте Telegram Stars и TON для себя или других пользователей!\n\n"
     
-    # Формируем приветственное сообщение
-    welcome_text = "🎉 <b>Добро пожаловать в Stars Exchange!</b>\n\n"
-    welcome_text += "💫 Обменивайте Telegram Stars на TON и обратно с лучшими курсами!\n\n"
-    
-    if referrer_user_id:
+    if referrer_user_id and is_new_user:
         welcome_text += "🎁 <b>Вы пришли по реферальной ссылке!</b>\n"
-        welcome_text += "Ваш друг получит бонус за приглашение, а вы - за активность!\n\n"
+        welcome_text += "Ваш друг получит бонус за приглашение!\n\n"
     
-    welcome_text += "🚀 Нажмите кнопку ниже, чтобы начать:"
+    welcome_text += "🚀 Выберите действие:"
     
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🚀 Открыть Stars Exchange",
+                    text="🚀 Открыть StarsGuru",
                     web_app=WebAppInfo(url=WEBAPP_URL)
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="👥 Рефералы",
-                    callback_data="referrals"
-                ),
-                InlineKeyboardButton(
-                    text="💰 Баланс", 
-                    callback_data="balance"
+                    text="📄 Документы",
+                    callback_data="documents"
                 )
             ]
         ]
     )
     
     await message.answer(welcome_text, reply_markup=keyboard, parse_mode="HTML")
-        
-@router.message(F.text == "💰 Баланс")
-async def balance_command(message: Message):
-    """Handle balance inquiry"""
-    user = message.from_user
+
+@router.callback_query(F.data == "documents")
+async def documents_callback(callback_query: CallbackQuery):
+    """Handle documents button press"""
+    documents_text = """
+📄 <b>Юридические документы StarsGuru</b>
+
+Ознакомьтесь с документами, регулирующими использование платформы:
+    """
     
-    async with AsyncSessionLocal() as session:
-        storage_instance = Storage(session)
-        db_user = await storage_instance.get_user_by_telegram_id(str(user.id))
-        
-        if not db_user:
-            await message.answer("❌ Пользователь не найден. Отправьте /start для регистрации.")
-            return
-        
-        balance_text = f"""
-💰 <b>Ваш баланс:</b>
-
-⭐ Telegram Stars: <b>{db_user.stars_balance}</b>
-💎 TON Balance: <b>{db_user.ton_balance}</b>
-
-📊 <b>Статистика:</b>
-🎯 Заданий выполнено: <b>{db_user.tasks_completed}</b>
-👥 Рефералов: <b>{db_user.total_referral_earnings}</b>
-🏆 Всего заработано: <b>{db_user.total_stars_earned} звезд</b>
-        """
-        
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🚀 Открыть приложение",
-                        web_app=WebAppInfo(url=WEBAPP_URL)
-                    )
-                ]
-            ]
-        )
-        
-        await message.answer(balance_text, reply_markup=keyboard, parse_mode="HTML")
-
-@router.message(F.text == "📈 Задания")
-async def tasks_command(message: Message):
-    """Handle tasks inquiry"""
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🎯 Выполнить задания",
-                    web_app=WebAppInfo(url=f"{WEBAPP_URL}#tasks")
+                    text="🔒 Политика конфиденциальности",
+                    url="https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-08-30-42"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Пользовательское соглашение",
+                    url="https://telegra.ph/POLZOVATELSKOE-SOGLASHENIE-08-30-21"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📞 Контактные данные поддержки",
+                    url="https://telegra.ph/KONTAKTNYE-DANNYE-SLUZHBY-PODDERZHKI-08-30"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data="back_to_main"
                 )
             ]
         ]
     )
     
-    tasks_text = """
-🎯 <b>Доступные задания:</b>
+    await callback_query.message.edit_text(
+        documents_text, 
+        reply_markup=keyboard, 
+        parse_mode="HTML"
+    )
+    await callback_query.answer()
 
-⭐ <b>Ежедневные:</b>
-• Ежедневный вход: +10 звезд
-
-🎁 <b>Социальные:</b>
-• Пригласить друга: +25 звезд
-• Подписаться на канал: +50 звезд
-
-💡 <b>Выполняйте задания каждый день и зарабатывайте больше звезд!</b>
-    """
+@router.callback_query(F.data == "back_to_main")
+async def back_to_main_callback(callback_query: CallbackQuery):
+    """Handle back to main menu"""
+    welcome_text = "🎉 <b>Добро пожаловать в StarsGuru!</b>\n\n"
+    welcome_text += "💫 Покупайте Telegram Stars и TON для себя или других пользователей!\n\n"
+    welcome_text += "🚀 Выберите действие:"
     
-    await message.answer(tasks_text, reply_markup=keyboard, parse_mode="HTML")
-
-@router.message(F.text == "👥 Рефералы")
-async def referrals_command(message: Message):
-    """Handle referrals inquiry"""
-    user = message.from_user
-    
-    async with AsyncSessionLocal() as session:
-        storage_instance = Storage(session)
-        db_user = await storage_instance.get_user_by_telegram_id(str(user.id))
-        
-        if not db_user:
-            await message.answer("❌ Пользователь не найден. Отправьте /start для регистрации.")
-            return
-        
-        storage_instance = Storage(session)
-        bot_url = await storage_instance.get_cached_setting("bot_base_url")
-        prefix = await storage_instance.get_cached_setting("referral_prefix")
-        referral_link = f"{bot_url}?start={prefix}{db_user.referral_code}"
-        
-        bonus_percent = await storage_instance.get_cached_setting("referral_bonus_percentage")
-        referrals_text = f"""
-👥 <b>Реферальная программа</b>
-
-💰 <b>Зарабатывайте {bonus_percent}% с каждой покупки друзей!</b>
-
-🔗 <b>Ваша реферальная ссылка:</b>
-<code>{referral_link}</code>
-
-📊 <b>Статистика:</b>
-👥 Приглашено друзей: <b>0</b>
-💰 Заработано с рефералов: <b>{db_user.total_referral_earnings} звезд</b>
-
-💡 <b>Поделитесь ссылкой с друзьями и зарабатывайте вместе!</b>
-        """
-        
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📤 Поделиться ссылкой",
-                        switch_inline_query=f"Попробуй этот крутой обменник Stars и TON! {referral_link}"
-                    )
-                ]
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🚀 Открыть StarsGuru",
+                    web_app=WebAppInfo(url=WEBAPP_URL)
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📄 Документы",
+                    callback_data="documents"
+                )
             ]
-        )
-        
-        await message.answer(referrals_text, reply_markup=keyboard, parse_mode="HTML")
+        ]
+    )
+    
+    await callback_query.message.edit_text(
+        welcome_text, 
+        reply_markup=keyboard, 
+        parse_mode="HTML"
+    )
+    await callback_query.answer()
 
 @router.message()
 async def default_handler(message: Message):
@@ -625,21 +552,31 @@ async def default_handler(message: Message):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🚀 Открыть Stars Exchange",
+                    text="🚀 Открыть StarsGuru",
                     web_app=WebAppInfo(url=WEBAPP_URL)
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📄 Документы",
+                    callback_data="documents"
                 )
             ]
         ]
     )
     
     await message.answer(
-        "👋 Используйте кнопку ниже для доступа к Stars Exchange:",
+        "👋 Используйте кнопки ниже для работы с платформой:",
         reply_markup=keyboard
     )
 
 async def main():
     """Main function to run the bot"""
     try:
+        # Initialize database
+        await init_db()
+        await init_default_data()
+        
         # Start polling
         logger.info("Starting bot...")
         await dp.start_polling(bot)
@@ -650,7 +587,7 @@ async def main():
         await bot.session.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main()) 
 
 ================================================================================
 FILE: backend\database.py
@@ -716,6 +653,8 @@ async def init_default_data():
             Setting(key="ton_markup_percentage", value="5"),
             Setting(key="ton_price_cache_minutes", value="15"),
             Setting(key="ton_fallback_price", value="420"),
+            Setting(key="taddy_enabled", value="true"),
+            Setting(key="taddy_pub_id", value=""),
         ]
         
         for setting in default_settings:
@@ -1742,7 +1681,15 @@ async def update_admin_settings(
         if settings.ton_fallback_price:
             logger.info(f"✅ Updating ton_fallback_price to: {settings.ton_fallback_price}")
             await storage.update_setting("ton_fallback_price", settings.ton_fallback_price)
-            ton_settings_changed = True
+            ton_settings_changed = True        
+        
+        if settings.taddy_enabled is not None:  # Проверяем именно на None, т.к. может быть False
+            logger.info(f"✅ Updating taddy_enabled to: {settings.taddy_enabled}")
+            await storage.update_setting("taddy_enabled", "true" if settings.taddy_enabled else "false")
+            
+        if settings.taddy_pub_id is not None:
+            logger.info(f"✅ Updating taddy_pub_id to: {settings.taddy_pub_id}")
+            await storage.update_setting("taddy_pub_id", settings.taddy_pub_id)
         
         # 🚀 АВТООБНОВЛЕНИЕ TON ЦЕНЫ ПРИ ИЗМЕНЕНИИ НАСТРОЕК
         updated_ton_price = None
@@ -2017,6 +1964,8 @@ async def get_admin_settings(storage: Storage = Depends(get_storage)):
         "bot_base_url": await storage.get_cached_setting("bot_base_url"),
         "referral_prefix": await storage.get_cached_setting("referral_prefix"),
         "referral_bonus_percentage": await storage.get_cached_setting("referral_bonus_percentage"),
+        "taddy_enabled": await storage.get_cached_setting("taddy_enabled"),
+        "taddy_pub_id": await storage.get_cached_setting("taddy_pub_id"),
     }
 
 @app.get("/api/admin/ton-diagnostics")
@@ -3119,6 +3068,8 @@ class AdminSettingsUpdate(BaseModel):
     bot_base_url: Optional[str] = None
     referral_prefix: Optional[str] = None
     referral_bonus_percentage: Optional[str] = None
+    taddy_enabled: Optional[bool] = None
+    taddy_pub_id: Optional[str] = None
 
 # Payment schemas
 class PaymentCreateResponse(BaseModel):
@@ -4508,27 +4459,33 @@ FILE: frontend\index.html
 ================================================================================
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/src/assets/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1" />
   
   <!-- Google Fonts - Manrope с поддержкой кириллицы -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap&subset=latin,cyrillic" rel="stylesheet">
-  
   <title>Stars Exchange</title>
 </head>
 
 <body>
   <div id="root"></div>
+  
+  <!-- Telegram Web App SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
+  
+  <!-- ✅ ДОБАВЛЯЕМ TADDY SDK -->
+  <script src="https://sdk.taddy.pro/web/taddy.min.js"></script>
+  
   <script type="module" src="/src/main.tsx"></script>
 </body>
 
-</html>
+</html> 
 
 ================================================================================
 FILE: frontend\package-lock.json
@@ -4539,7 +4496,7 @@ FILE: frontend\package-lock.json
   "version": "1.0.0",
   "lockfileVersion": 3,
   "requires": true,
-  "packages": {  }
+  "packages": {}
 }
 
 
@@ -4553,7 +4510,7 @@ FILE: frontend\package.json
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "vite",
+    "dev": "NODE_OPTIONS='--max-old-space-size=4096' vite",
     "build": "vite build",
     "preview": "vite preview",
     "check": "tsc",
@@ -5377,364 +5334,6 @@ import "./index.css";
 
 createRoot(document.getElementById("root")!).render(<App />);
 
-
-================================================================================
-FILE: frontend\src\components\admin-panel.tsx
-================================================================================
-
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
-import {
-  Shield,
-  X,
-  BarChart3,
-  Tag,
-  History,
-  Users,
-  DollarSign,
-  Activity,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-
-interface AdminPanelProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
-  const [starsPrice, setStarsPrice] = useState("");
-  const [tonPrice, setTonPrice] = useState("");
-  const [markupPercentage, setMarkupPercentage] = useState("");
-  const [botBaseUrl, setBotBaseUrl] = useState("");
-  const [referralPrefix, setReferralPrefix] = useState("");
-  const [referralBonusPercentage, setReferralBonusPercentage] = useState("");
-
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-
-  const { data: adminStats } = useQuery({
-    queryKey: ["/api/admin/stats"],
-    enabled: isOpen,
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/admin/stats");
-      return response.json();
-    },
-  });
-
-  const { data: currentSettings } = useQuery({
-    queryKey: ["/api/admin/settings/current"],
-    enabled: isOpen,
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/admin/settings/current");
-      return response.json();
-    },
-  });
-
-  useEffect(() => {
-    if (currentSettings) {
-      setStarsPrice(currentSettings.stars_price || "");
-      setTonPrice(currentSettings.ton_price || "");
-      setMarkupPercentage(currentSettings.markup_percentage || "");
-      setBotBaseUrl(currentSettings.bot_base_url || "");
-      setReferralPrefix(currentSettings.referral_prefix || "");
-      setReferralBonusPercentage(currentSettings.referral_bonus_percentage || "");
-    }
-  }, [currentSettings]);
-
-  const updateSettingsMutation = useMutation({
-    mutationFn: async (settings: {
-      starsPrice: string;
-      tonPrice: string;
-      markupPercentage: string;
-      botBaseUrl: string;
-      referralPrefix: string;
-      referralBonusPercentage: string;
-    }) => {
-      const response = await apiRequest("PUT", "/api/admin/settings", {
-        stars_price: settings.starsPrice,
-        ton_price: settings.tonPrice,
-        markup_percentage: settings.markupPercentage,
-        bot_base_url: settings.botBaseUrl,
-        referral_prefix: settings.referralPrefix,
-        referral_bonus_percentage: settings.referralBonusPercentage,
-      });
-      return response.json();
-    },
-    onSuccess: () => {
-      toast({
-        title: "Настройки обновлены",
-        description: "Цены успешно обновлены",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/current"] });
-    },
-    onError: () => {
-      toast({
-        title: "Ошибка",
-        description: "Не удалось обновить настройки",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleUpdatePrices = () => {
-    updateSettingsMutation.mutate({
-      starsPrice,
-      tonPrice,
-      markupPercentage,
-      botBaseUrl,
-      referralPrefix,
-      referralBonusPercentage,
-    });
-  };
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <div className="fixed inset-0 z-50">
-          <motion.div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <motion.div
-            className="absolute bottom-0 left-0 right-0 bg-white dark:bg-[#1A1A1C] rounded-t-2xl p-6 max-h-[80vh] overflow-y-auto shadow-2xl"
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 25, stiffness: 500 }}
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold flex items-center">
-                <Shield className="w-5 h-5 text-[#4E7FFF] mr-2" />
-                Админ панель
-              </h2>
-              <Button
-                onClick={onClose}
-                variant="ghost"
-                size="icon"
-                className="hover:bg-gray-100 dark:hover:bg-white/10"
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Statistics */}
-              <motion.div
-                className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
-              >
-                <h3 className="font-semibold mb-3 flex items-center">
-                  <BarChart3 className="w-4 h-4 text-green-500 mr-2" />
-                  Статистика
-                </h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600 dark:text-gray-400 flex items-center">
-                      <Users className="w-4 h-4 mr-1" />
-                      Пользователей
-                    </span>
-                    <span className="font-semibold">
-                      {adminStats?.totalUsers || 0}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600 dark:text-gray-400 flex items-center">
-                      <DollarSign className="w-4 h-4 mr-1" />
-                      Продаж сегодня
-                    </span>
-                    <span className="font-semibold text-green-500">
-                      ₽{adminStats?.todaySales || 0}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600 dark:text-gray-400 flex items-center">
-                      <Activity className="w-4 h-4 mr-1" />
-                      Активных рефералов
-                    </span>
-                    <span className="font-semibold">
-                      {adminStats?.activeReferrals || 0}
-                    </span>
-                  </div>
-                </div>
-              </motion.div>
-
-              {/* Price Management */}
-              <motion.div
-                className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-              >
-                <h3 className="font-semibold mb-3 flex items-center">
-                  <Tag className="w-4 h-4 text-yellow-500 mr-2" />
-                  Управление ценами
-                </h3>
-                <div className="space-y-3">
-                  <div>
-                    <Label className="text-sm text-gray-600 dark:text-gray-400">
-                      Цена за звезду (₽)
-                    </Label>
-                    <Input
-                      type="number"
-                      value={starsPrice}
-                      onChange={(e) => setStarsPrice(e.target.value)}
-                      step="0.01"
-                      className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-sm text-gray-600 dark:text-gray-400">
-                      Цена за TON (₽)
-                    </Label>
-                    <Input
-                      type="number"
-                      value={tonPrice}
-                      onChange={(e) => setTonPrice(e.target.value)}
-                      step="0.01"
-                      className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-sm text-gray-600 dark:text-gray-400">
-                      Наценка (%)
-                    </Label>
-                    <Input
-                      type="number"
-                      value={markupPercentage}
-                      onChange={(e) => setMarkupPercentage(e.target.value)}
-                      step="0.1"
-                      className="mt-1 bg-white dark:bg-[#1A1A1C] border-gray-200 dark:border-white/20"
-                    />
-                  </div>
-                  <Button
-                    onClick={handleUpdatePrices}
-                    disabled={updateSettingsMutation.isPending}
-                    className="w-full bg-[#4E7FFF] hover:bg-[#3D6FFF] text-white"
-                  >
-                    {updateSettingsMutation.isPending
-                      ? "Обновляется..."
-                      : "Обновить цены"}
-                  </Button>
-                </div>
-              </motion.div>
-
-              {/* Referral Settings */}
-              <motion.div
-                className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.25 }}
-              >
-                <h3 className="font-semibold mb-3 flex items-center">
-                  <Shield className="w-4 h-4 text-blue-500 mr-2" />
-                  Реферальные настройки
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>URL бота</Label>
-                    <Input
-                      value={botBaseUrl}
-                      onChange={(e) => setBotBaseUrl(e.target.value)}
-                      placeholder="https://t.me/bot_name"
-                    />
-                  </div>
-                  <div>
-                    <Label>Префикс реферальных ссылок</Label>
-                    <Input
-                      value={referralPrefix}
-                      onChange={(e) => setReferralPrefix(e.target.value)}
-                      placeholder="ref"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Label>Процент реферального бонуса (%)</Label>
-                    <Input
-                      type="number"
-                      value={referralBonusPercentage}
-                      onChange={(e) => setReferralBonusPercentage(e.target.value)}
-                      placeholder="10"
-                    />
-                  </div>
-                </div>
-              </motion.div>
-
-              {/* Recent Transactions */}
-              <motion.div
-                className="bg-gray-50 dark:bg-[#0E0E10] rounded-xl p-4 md:col-span-2"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-              >
-                <h3 className="font-semibold mb-3 flex items-center">
-                  <History className="w-4 h-4 text-[#4E7FFF] mr-2" />
-                  Последние транзакции
-                </h3>
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {adminStats?.recentTransactions?.length ? (
-                    adminStats.recentTransactions.map((transaction: any) => (
-                      <div
-                        key={transaction.id}
-                        className="flex items-center justify-between py-2 border-b border-gray-200 dark:border-white/10 last:border-b-0"
-                      >
-                        <div>
-                          <p className="font-medium">{transaction.username}</p>
-                          <p className="text-gray-600 dark:text-gray-400 text-sm">
-                            {transaction.description}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p
-                            className={`font-medium ${
-                              transaction.status === "completed"
-                                ? "text-green-500"
-                                : transaction.status === "failed"
-                                ? "text-red-500"
-                                : "text-yellow-500"
-                            }`}
-                          >
-                            {transaction.status === "completed"
-                              ? "Успешно"
-                              : transaction.status === "failed"
-                              ? "Ошибка"
-                              : "В обработке"}
-                          </p>
-                          <p className="text-gray-600 dark:text-gray-400 text-xs">
-                            {new Date(transaction.createdAt).toLocaleTimeString(
-                              "ru-RU",
-                              {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              }
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-gray-500 dark:text-gray-400 text-center py-4">
-                      Транзакций пока нет
-                    </p>
-                  )}
-                </div>
-              </motion.div>
-            </div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-  );
-}
 
 ================================================================================
 FILE: frontend\src\components\balance-card.tsx
@@ -13599,6 +13198,125 @@ export function usePreloadAvatar(user?: SnakeCaseUser | null): UsePreloadAvatarR
 }
 
 ================================================================================
+FILE: frontend\src\hooks\use-taddy.ts
+================================================================================
+
+// src/hooks/use-taddy.ts
+
+import { useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/queryClient';
+
+// Расширяем глобальный объект Window
+declare global {
+  interface Window {
+    Taddy?: {
+      init(pubId: string): void;
+      ready(): void;
+      exchange(): {
+        feed(params: {
+          limit?: number;
+          imageFormat?: 'png' | 'webp' | 'jpg';
+          autoImpressions?: boolean;
+          showCompleted?: boolean;
+        }): Promise<any[]>;
+        impressions(items: any[]): void;
+        open(item: any, autoCheck?: boolean): Promise<void>;
+        check(item: any): Promise<boolean>;
+      };
+      ads(): {
+        interstitial(params?: {
+          onClosed?: () => void;
+          onViewThrough?: (id: string) => void;
+        }): Promise<boolean>;
+      };
+    };
+  }
+}
+
+interface TaddySettings {
+  enabled: boolean;
+  pubId: string;
+}
+
+export function useTaddy() {
+  const initRef = useRef(false);
+  
+  // Получаем настройки Taddy из админки
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ['/api/admin/settings/current'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/admin/settings/current');
+      const data = await response.json();
+      return {
+        enabled: data.taddy_enabled === 'true',
+        pubId: data.taddy_pub_id || '',
+      } as TaddySettings;
+    },
+    staleTime: 5 * 60 * 1000, // 5 минут кэша
+    refetchOnWindowFocus: false,
+  });
+
+  // Инициализация Taddy SDK
+  useEffect(() => {
+    if (isLoading || !settings?.enabled || !settings?.pubId || initRef.current) {
+      return;
+    }
+
+    const initTaddy = () => {
+      if (window.Taddy) {
+        try {
+          console.log('🎯 Initializing Taddy SDK with pubId:', settings.pubId);
+          
+          // Инициализируем Taddy
+          window.Taddy.init(settings.pubId);
+          
+          // Отправляем ready event для регистрации запуска
+          window.Taddy.ready();
+          
+          initRef.current = true;
+          console.log('✅ Taddy SDK initialized successfully');
+          
+        } catch (error) {
+          console.error('❌ Taddy initialization failed:', error);
+        }
+      } else {
+        console.warn('⚠️ Taddy SDK not loaded');
+      }
+    };
+
+    // Если Taddy уже загружен
+    if (window.Taddy) {
+      initTaddy();
+    } else {
+      // Ждем загрузки SDK
+      const checkTaddy = setInterval(() => {
+        if (window.Taddy) {
+          initTaddy();
+          clearInterval(checkTaddy);
+        }
+      }, 100);
+
+      // Таймаут на 5 секунд
+      setTimeout(() => {
+        clearInterval(checkTaddy);
+        if (!initRef.current) {
+          console.error('❌ Taddy SDK failed to load within 5 seconds');
+        }
+      }, 5000);
+    }
+  }, [settings?.enabled, settings?.pubId, isLoading]);
+
+  return {
+    isEnabled: settings?.enabled ?? false,
+    isInitialized: initRef.current,
+    taddy: window.Taddy || null,
+    settings,
+    isLoading,
+  };
+}
+
+================================================================================
 FILE: frontend\src\hooks\use-telegram.ts
 ================================================================================
 
@@ -14229,6 +13947,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";  // ✅ ДОБАВЛЕН ИМПОРТ
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -14288,6 +14007,9 @@ type CurrentSettings = {
   referral_prefix?: string;
   referral_bonus_percentage?: string | number;
   referral_registration_bonus?: string | number;
+  // ✅ ДОБАВЛЕНЫ TADDY ТИПЫ
+  taddy_enabled?: string;
+  taddy_pub_id?: string;
 };
 
 export default function AdminPage(): JSX.Element {
@@ -14301,6 +14023,10 @@ export default function AdminPage(): JSX.Element {
   const [referralBonusPercentage, setReferralBonusPercentage] = useState<string>("");
   const [referralRegistrationBonus, setReferralRegistrationBonus] = useState<string>("");
   const [showTransactions, setShowTransactions] = useState<boolean>(false);
+
+  // ✅ ДОБАВЛЕНЫ TADDY СОСТОЯНИЯ
+  const [taddyEnabled, setTaddyEnabled] = useState<boolean>(false);
+  const [taddyPubId, setTaddyPubId] = useState<string>("");
 
   // Новые состояния для аналитики
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodFilter>('all');
@@ -14466,6 +14192,10 @@ export default function AdminPage(): JSX.Element {
       setReferralPrefix(String(currentSettings.referral_prefix || "ref"));
       setReferralBonusPercentage(normalizeToStringNumber(currentSettings.referral_bonus_percentage, "10"));
       setReferralRegistrationBonus(normalizeToStringNumber(currentSettings.referral_registration_bonus, "25"));
+      
+      // ✅ ДОБАВЛЕНА ЗАГРУЗКА TADDY НАСТРОЕК
+      setTaddyEnabled(currentSettings.taddy_enabled === "true");
+      setTaddyPubId(String(currentSettings.taddy_pub_id || ""));
     }
   }, [currentSettings]);
 
@@ -14505,6 +14235,9 @@ export default function AdminPage(): JSX.Element {
       bot_base_url: botBaseUrl,
       referral_prefix: referralPrefix,
       referral_bonus_percentage: referralBonusPercentage,
+      // ✅ ДОБАВЛЕНЫ TADDY НАСТРОЙКИ
+      taddy_enabled: taddyEnabled,
+      taddy_pub_id: taddyPubId.trim() || undefined,
     });
   };
 
@@ -14950,7 +14683,7 @@ export default function AdminPage(): JSX.Element {
                 className="w-full"
                 disabled={updateSettingsMutation.isPending}
               >
-                {updateSettingsMutation.isPending ? "Обновляется..." : "Обновить цены"}
+                {updateSettingsMutation.isPending ? "Обновляется..." : "Обновить настройки"}
               </Button>
             </div>
           </div>
@@ -14993,6 +14726,86 @@ export default function AdminPage(): JSX.Element {
                 placeholder="10"
               />
             </div>
+          </div>
+        </motion.div>
+
+        {/* ✅ НОВАЯ СЕКЦИЯ TADDY */}
+        <motion.div
+          className="bg-gray-50 dark:bg-[#1A1A1C] rounded-xl p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.85 }}
+        >
+          <h3 className="font-semibold mb-3 flex items-center">
+            <Activity className="w-4 h-4 text-indigo-500 mr-2" />
+            Интеграция Taddy
+          </h3>
+          
+          <div className="space-y-4">
+            {/* Переключатель включения Taddy */}
+            <div className="flex items-center justify-between p-4 bg-white dark:bg-[#0E0E10] rounded-lg border border-gray-200 dark:border-gray-700">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                </div>
+                <div>
+                  <Label htmlFor="taddy-enabled" className="text-sm font-medium cursor-pointer">
+                    Включить Taddy SDK
+                  </Label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Интеграция с системой обмена заданиями Taddy
+                  </p>
+                </div>
+              </div>
+              <Switch
+                id="taddy-enabled"
+                checked={taddyEnabled}
+                onCheckedChange={setTaddyEnabled}
+              />
+            </div>
+
+            {/* Pub ID (показываем только если включено) */}
+            <AnimatePresence>
+              {taddyEnabled && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <Label htmlFor="taddy-pub-id" className="text-sm font-medium">
+                        Taddy Publisher ID
+                      </Label>
+                      <Input
+                        id="taddy-pub-id"
+                        type="text"
+                        value={taddyPubId}
+                        onChange={(e) => setTaddyPubId(e.target.value)}
+                        placeholder="your-taddy-pub-id-here"
+                        className="mt-1"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        ID издателя из панели управления Taddy. Обязателен для работы интеграции.
+                      </p>
+                    </div>
+                    
+                    {taddyPubId && (
+                      <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                        <p className="text-sm text-green-700 dark:text-green-300 font-medium">
+                          Taddy настроен корректно
+                        </p>
+                        <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                          После сохранения настроек SDK будет инициализирован с ID: <code className="bg-green-100 dark:bg-green-800 px-1 rounded">{taddyPubId}</code>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </motion.div>
 

@@ -43,6 +43,8 @@ class Transaction(Base):
     rub_amount = Column(Numeric(10, 2), nullable=True)
     status = Column(String, default="pending")  # 'pending', 'completed', 'failed', 'cancelled'
     description = Column(Text, nullable=True)
+    email = Column(String, nullable=True)  # Email для чека
+    recipient_username = Column(String, nullable=True)
     
     # 🚀 НОВОЕ ПОЛЕ для правильного расчета прибыли от TON
     ton_price_at_purchase = Column(Numeric(10, 2), nullable=True)  # Цена TON на момент покупки

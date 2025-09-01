@@ -25,7 +25,7 @@ from database import get_db, init_db, init_default_data, AsyncSessionLocal
 from api import AsyncFragmentAPIClient
 from storage import Storage
 from telegram_auth import get_current_user
-from robokassa import get_robokassa
+from freekassa import get_freekassa
 from schemas import *
 from models import User, Transaction
 import json
@@ -58,6 +58,16 @@ async def log_requests(request: Request, call_next):
         logger.info(f"{request.method} {request.url.path} {response.status_code} in {duration:.0f}ms")
     
     return response
+
+def get_client_ip(request) -> str:
+    if hasattr(request, 'headers'):
+        real_ip = request.headers.get('X-Real-IP')
+        if real_ip:
+            return real_ip
+        forwarded_for = request.headers.get('X-Forwarded-For')
+        if forwarded_for:
+            return forwarded_for.split(',')[0].strip()
+    return getattr(request.client, 'host', 'unknown')
 
 # Dependency to get storage
 async def get_storage(db: AsyncSession = Depends(get_db)):
@@ -400,39 +410,32 @@ async def calculate_purchase(
         raise HTTPException(status_code=500, detail="Failed to calculate price")
 
 @app.post("/api/purchase", response_model=PaymentCreateResponse)
-async def make_purchase(
+async def create_purchase(
     purchase_data: PurchaseRequest,
     current_user: User = Depends(get_authenticated_user),
     storage: Storage = Depends(get_storage)
 ):
+    """Создание платежа"""
     try:
         # Validate currency
-        if purchase_data.currency not in ['stars', 'ton']:
-            raise HTTPException(status_code=400, detail="Invalid currency. Must be 'stars' or 'ton'")
+        if purchase_data.currency not in ["stars", "ton"]:
+            raise HTTPException(status_code=400, detail="Invalid currency")
         
-        # Validate minimum amounts
+        # Get current prices
+        prices = await get_current_prices()
+        
+        # Validate amount
         min_amounts = {"stars": 50, "ton": 0.1}
         if purchase_data.amount < min_amounts[purchase_data.currency]:
+            min_amount = min_amounts[purchase_data.currency]
             raise HTTPException(
                 status_code=400, 
-                detail=f"Minimum amount for {purchase_data.currency} is {min_amounts[purchase_data.currency]}"
+                detail=f"Minimum amount for {purchase_data.currency} is {min_amount}"
             )
         
-        robokassa = get_robokassa()
-        if not robokassa:
-            raise HTTPException(status_code=500, detail="Payment system not configured")
-        
-        # Get current prices without markup
-        prices = {
-            "stars": float(await storage.get_cached_setting("stars_price")),
-            "ton": await ton_price_service.get_current_ton_price_rub(storage),
-        }
-        
-        # Calculate total price without markup
+        # Calculate expected total
         calculated_total = purchase_data.amount * prices[purchase_data.currency]
-        
-        # Verify that the sent rub_amount matches our calculation
-        if abs(calculated_total - purchase_data.rub_amount) > 0.01:  # Allow 1 kopeck difference
+        if abs(calculated_total - purchase_data.rub_amount) > 1:
             raise HTTPException(
                 status_code=400, 
                 detail=f"Price mismatch. Expected: {calculated_total:.2f}, got: {purchase_data.rub_amount:.2f}"
@@ -450,27 +453,36 @@ async def make_purchase(
             amount=Decimal(str(purchase_data.amount)),
             rub_amount=Decimal(str(purchase_data.rub_amount)),
             status="pending",
-            description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
-            payment_system="robokassa",
+            description=f"Покупка {purchase_data.amount} {purchase_data.currency}" + 
+                       (f" для @{purchase_data.username}" if purchase_data.username else ""),
+            payment_system="freekassa",
             invoice_id=invoice_id,
-            recipient_username=purchase_data.username,
+            recipient_username=purchase_data.username,  # ← СОХРАНЯЕМ ПОЛУЧАТЕЛЯ
+            email=purchase_data.email,  # ← СОХРАНЯЕМ EMAIL
             ton_price_at_purchase=Decimal(str(prices["ton"])) if purchase_data.currency == "ton" else None
         )
         
         transaction = await storage.create_transaction(transaction_data)
         
-        # Create payment URL
-        payment_url = robokassa.create_payment_url(
-            invoice_id=invoice_id,
+        # Create payment URL with FreeKassa
+        freekassa = get_freekassa()
+        if not freekassa:
+            raise HTTPException(status_code=500, detail="Payment system not configured")
+            
+        payment_url = freekassa.create_payment_url(
+            order_id=invoice_id,
             amount=Decimal(str(purchase_data.rub_amount)),
-            description=f"Покупка {purchase_data.amount} {purchase_data.currency}",
-            user_email=f"{current_user.telegram_id}@telegram.user"
+            description=f"Покупка {purchase_data.amount} {purchase_data.currency}" + 
+                       (f" для @{purchase_data.username}" if purchase_data.username else ""),
+            user_email=purchase_data.email,
+            currency="RUB"
         )
         
         # Update transaction with payment URL
         await storage.update_transaction(transaction.id, {"payment_url": payment_url})
         
-        logger.info(f"Created payment for user {current_user.telegram_id}: {purchase_data.rub_amount} RUB for {purchase_data.amount} {purchase_data.currency}")
+        logger.info(f"Created FreeKassa payment for user {current_user.telegram_id}: {purchase_data.rub_amount} RUB for {purchase_data.amount} {purchase_data.currency}" + 
+                   (f" to @{purchase_data.username}" if purchase_data.username else ""))
         
         return PaymentCreateResponse(
             transaction_id=transaction.id,
@@ -673,78 +685,96 @@ async def get_referral_stats_v2(
         logger.info(f"🎯 Returning fallback result: {fallback_result}")
         return fallback_result
     
-# Payment webhook and status routes
-@app.post("/api/payment/webhook/robokassa")
-async def robokassa_webhook(
+@app.post("/api/payment/webhook/freekassa")
+async def freekassa_webhook(
     request: Request,
     storage: Storage = Depends(get_storage)
 ):
-    """Handle Robokassa payment webhook"""
+    """Обработка webhook от FreeKassa"""
     try:
-        robokassa = get_robokassa()
-        if not robokassa:
+        # Получить IP клиента для проверки безопасности
+        client_ip = get_client_ip(request)
+        logger.info(f"FreeKassa webhook from IP: {client_ip}")
+        
+        # Получить данные из формы
+        form_data = await request.form()
+        webhook_data = FreekassaWebhookData(
+            MERCHANT_ID=form_data.get("MERCHANT_ID", ""),
+            AMOUNT=form_data.get("AMOUNT", ""),
+            intid=form_data.get("intid", ""),
+            MERCHANT_ORDER_ID=form_data.get("MERCHANT_ORDER_ID", ""),
+            P_EMAIL=form_data.get("P_EMAIL", ""),
+            P_PHONE=form_data.get("P_PHONE"),
+            CUR_ID=form_data.get("CUR_ID", ""),
+            payer_account=form_data.get("payer_account"),
+            SIGN=form_data.get("SIGN", ""),
+            us_field1=form_data.get("us_field1"),
+            us_field2=form_data.get("us_field2")
+        )
+        
+        logger.info(f"Received FreeKassa webhook: {webhook_data}")
+        
+        # Получить инстанс FreeKassa
+        freekassa = get_freekassa()
+        if not freekassa:
             raise HTTPException(status_code=500, detail="Payment system not configured")
         
-        # Parse form data
-        form_data = await request.form()
-        webhook_data = dict(form_data)
-        
-        logger.info(f"Received Robokassa webhook: {webhook_data}")
-        
-        # Verify signature
-        if not robokassa.verify_payment_result(webhook_data):
-            logger.error("Invalid Robokassa signature")
+        # Проверить подпись
+        if not freekassa.verify_payment_result(webhook_data.dict(), client_ip):
+            logger.error("Invalid FreeKassa signature")
             raise HTTPException(status_code=400, detail="Invalid signature")
         
-        invoice_id = webhook_data.get('InvId')
-        out_sum = webhook_data.get('OutSum')
-        
-        if not invoice_id:
-            raise HTTPException(status_code=400, detail="Missing InvId")
-        
-    
-        
-        result = await storage.db.execute(
-            select(Transaction).where(Transaction.invoice_id == invoice_id)
-        )
-        transaction = result.scalar_one_or_none()
-        
+        # Найти транзакцию
+        transaction = await storage.get_transaction(webhook_data.MERCHANT_ORDER_ID)
         if not transaction:
-            logger.error(f"Transaction not found for invoice_id: {invoice_id}")
+            logger.error(f"Transaction not found: {webhook_data.MERCHANT_ORDER_ID}")
             raise HTTPException(status_code=404, detail="Transaction not found")
         
-        # Update transaction status
-        updates = {
-            "status": "completed",
-            "paid_at": datetime.utcnow(),
-            "payment_data": json.dumps(webhook_data)
-        }
+        # Проверить сумму
+        expected_amount = float(transaction.rub_amount or 0)
+        received_amount = float(webhook_data.AMOUNT)
         
-        await storage.update_transaction(transaction.id, updates)
+        if abs(expected_amount - received_amount) > 0.01:  # Допуск 1 копейка
+            logger.error(f"Amount mismatch: expected {expected_amount}, received {received_amount}")
+            raise HTTPException(status_code=400, detail="Amount mismatch")
         
-        # Update user balance
-        user = await storage.get_user(transaction.user_id)
-        if user and transaction.type in ["buy_stars", "buy_ton"]:
-            if transaction.currency == "stars":
-                user_updates = {
-                    "stars_balance": user.stars_balance + int(transaction.amount),
-                    "total_stars_earned": user.total_stars_earned + int(transaction.amount)
-                }
-                await storage.update_user(user.id, user_updates)
-                logger.info(f"Added {transaction.amount} stars to user {user.telegram_id}")
-            elif transaction.currency == "ton":
-                logger.info(f"TON purchase completed for user {user.telegram_id}: {transaction.amount} TON")
-                # TON is sent to Telegram wallet - no balance update needed
+        # Обновить статус транзакции
+        if transaction.status != "completed":
+            await storage.update_transaction(transaction.id, {
+                "status": "completed",
+                "paid_at": datetime.utcnow(),
+                "payment_data": json.dumps(webhook_data.dict())
+            })
             
-            logger.info(f"Payment completed for invoice {invoice_id}, amount: {out_sum} RUB")
+            # Начислить валюту пользователю
+            if transaction.currency == "ton":
+                user = await storage.get_user(transaction.user_id)
+                if user:
+                    new_balance = user.ton_balance + transaction.amount
+                    await storage.update_user(user.id, {"ton_balance": new_balance})
+            elif transaction.currency == "stars":
+                await storage.add_user_stars(transaction.user_id, int(transaction.amount))
+            
+            # Обработать реферальный бонус
+            user = await storage.get_user(transaction.user_id)
+            if user and user.referred_by:
+                bonus_amount = int(float(transaction.amount) * 0.1)  # 10% бонус
+                await storage.process_referral_bonus(user.referred_by, bonus_amount)
+            
+            # Логирование с получателем
+            log_msg = f"FreeKassa transaction {transaction.id} completed successfully"
+            if transaction.recipient_username:
+                log_msg += f" (recipient: @{transaction.recipient_username})"
+            logger.info(log_msg)
         
-        return {"status": "OK"}
+        # FreeKassa expects "YES" response for confirmation
+        return "YES"
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
-        raise HTTPException(status_code=500, detail="Webhook processing failed")
+        logger.error(f"Error processing FreeKassa webhook: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/payment/status/{transaction_id}", response_model=PaymentStatusResponse)
 async def get_payment_status(
@@ -800,6 +830,218 @@ async def get_payment_status(
     except Exception as e:
         logger.error(f"Error getting payment status: {e}")
         raise HTTPException(status_code=500, detail="Failed to get payment status")
+
+# Добавить в main.py эти endpoints:
+
+@app.get("/payment/success")
+async def payment_success_page():
+    """Страница успешной оплаты"""
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Оплата успешна</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <style>
+            body { 
+                margin: 0; 
+                padding: 20px; 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #10b981, #3b82f6);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .container {
+                background: white;
+                border-radius: 16px;
+                padding: 40px 30px;
+                text-align: center;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                max-width: 400px;
+                width: 100%;
+            }
+            .icon { 
+                font-size: 64px; 
+                color: #10b981; 
+                margin-bottom: 20px; 
+            }
+            h1 { 
+                color: #111827; 
+                margin-bottom: 10px; 
+            }
+            p { 
+                color: #6b7280; 
+                margin-bottom: 30px; 
+            }
+            .button {
+                background: #4E7FFF;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 12px;
+                font-weight: 600;
+                width: 100%;
+                cursor: pointer;
+                font-size: 16px;
+            }
+            .button:hover { 
+                background: #3D6FFF; 
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="icon">✅</div>
+            <h1>Оплата успешна!</h1>
+            <p>Ваш платеж обработан. Средства поступят на счет в течение нескольких минут.</p>
+            <button class="button" onclick="closeApp()">Вернуться в приложение</button>
+            <p style="font-size: 12px; margin-top: 20px; color: #9ca3af;">
+                Если у вас возникли вопросы, обратитесь в поддержку
+            </p>
+        </div>
+        
+        <script>
+            function closeApp() {
+                if (window.Telegram && window.Telegram.WebApp) {
+                    window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+                    setTimeout(() => {
+                        window.Telegram.WebApp.close();
+                    }, 500);
+                } else {
+                    window.location.href = '/';
+                }
+            }
+            
+            // Auto haptic feedback on load
+            if (window.Telegram && window.Telegram.WebApp) {
+                window.Telegram.WebApp.ready();
+                window.Telegram.WebApp.HapticFeedback.impactOccurred('heavy');
+            }
+        </script>
+    </body>
+    </html>
+    """)
+
+@app.get("/payment/error")
+async def payment_error_page():
+    """Страница ошибки оплаты"""
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Ошибка оплаты</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <style>
+            body { 
+                margin: 0; 
+                padding: 20px; 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #ef4444, #f97316);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .container {
+                background: white;
+                border-radius: 16px;
+                padding: 40px 30px;
+                text-align: center;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                max-width: 400px;
+                width: 100%;
+            }
+            .icon { 
+                font-size: 64px; 
+                color: #ef4444; 
+                margin-bottom: 20px; 
+            }
+            h1 { 
+                color: #111827; 
+                margin-bottom: 10px; 
+            }
+            p { 
+                color: #6b7280; 
+                margin-bottom: 30px; 
+            }
+            .button {
+                background: #4E7FFF;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 12px;
+                font-weight: 600;
+                width: 100%;
+                cursor: pointer;
+                font-size: 16px;
+                margin-bottom: 12px;
+            }
+            .button:hover { 
+                background: #3D6FFF; 
+            }
+            .button-outline {
+                background: transparent;
+                color: #4E7FFF;
+                border: 2px solid #4E7FFF;
+            }
+            .button-outline:hover {
+                background: #f8fafc;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="icon">❌</div>
+            <h1>Оплата не удалась</h1>
+            <p>Платеж был отменен или произошла ошибка. Вы можете попробовать еще раз.</p>
+            
+            <button class="button" onclick="tryAgain()">🔄 Попробовать снова</button>
+            <button class="button button-outline" onclick="closeApp()">← На главную</button>
+            
+            <p style="font-size: 12px; margin-top: 20px; color: #9ca3af;">
+                Деньги не были списаны с вашего счета
+            </p>
+        </div>
+        
+        <script>
+            function tryAgain() {
+                if (window.Telegram && window.Telegram.WebApp) {
+                    window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+                    setTimeout(() => {
+                        window.Telegram.WebApp.close();
+                    }, 500);
+                } else {
+                    window.location.href = '/?tab=buy';
+                }
+            }
+            
+            function closeApp() {
+                if (window.Telegram && window.Telegram.WebApp) {
+                    window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
+                    setTimeout(() => {
+                        window.Telegram.WebApp.close();
+                    }, 500);
+                } else {
+                    window.location.href = '/';
+                }
+            }
+            
+            // Auto haptic feedback on load
+            if (window.Telegram && window.Telegram.WebApp) {
+                window.Telegram.WebApp.ready();
+                window.Telegram.WebApp.HapticFeedback.impactOccurred('heavy');
+            }
+        </script>
+    </body>
+    </html>
+    """)
+
 
 @app.get("/api/admin/stats")
 async def get_admin_stats(storage: Storage = Depends(get_storage)):
