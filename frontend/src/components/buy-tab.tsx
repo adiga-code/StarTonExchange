@@ -168,7 +168,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
 
           hapticFeedback('success');
           toast({
-            title: "Оплата успешна!",
+            title: "Оплата успешна!", 
             description: `${selectedCurrency === 'stars' ? 'Звезды' : 'TON'} добавлены на ваш счет`,
           });
           return;
