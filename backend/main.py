@@ -796,10 +796,11 @@ async def get_payment_status(
             raise HTTPException(status_code=403, detail="Access denied")
         
         # If pending and has invoice_id, check with payment system
-        if transaction.status == "pending" and transaction.invoice_id:
-            robokassa = get_robokassa()
-            if robokassa:
-                payment_status = await robokassa.check_payment_status(transaction.invoice_id)
+        # If pending and has invoice_id, check with FreeKassa
+        if transaction.status == "pending" and transaction.invoice_id and transaction.payment_system == "freekassa":
+            freekassa = get_freekassa()
+            if freekassa:
+                payment_status = await freekassa.check_payment_status(transaction.invoice_id)
                 
                 if payment_status and payment_status['status'] == 'paid':
                     # Update transaction status
@@ -815,6 +816,11 @@ async def get_payment_status(
                         user_updates = {
                             "stars_balance": current_user.stars_balance + int(transaction.amount),
                             "total_stars_earned": current_user.total_stars_earned + int(transaction.amount)
+                        }
+                        await storage.update_user(current_user.id, user_updates)
+                    elif transaction.currency == "ton":
+                        user_updates = {
+                            "ton_balance": current_user.ton_balance + transaction.amount
                         }
                         await storage.update_user(current_user.id, user_updates)
                     

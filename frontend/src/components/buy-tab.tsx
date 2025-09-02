@@ -149,10 +149,13 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     setIsProcessing(true);
     onShowLoading('Ожидаем оплату...');
 
-    const maxAttempts = 30;
+    const maxAttempts = 60; // Увеличиваем до 10 минут
+    const timeout = 10 * 60 * 1000; // 10 минут максимум
+    const startTime = Date.now();
     let attempts = 0;
 
     const checkStatus = async () => {
+
       try {
         const response = await apiRequest('GET', `/api/payment/status/${transactionId}`);
         const statusData = await response.json();

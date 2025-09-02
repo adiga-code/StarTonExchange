@@ -10,7 +10,7 @@ export default function LoadingModal({ isOpen, message = "Загрузка..." }
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
           <motion.div
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             initial={{ opacity: 0 }}
@@ -18,7 +18,7 @@ export default function LoadingModal({ isOpen, message = "Загрузка..." }
             exit={{ opacity: 0 }}
           />
           <motion.div
-            className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-[#1A1A1C] rounded-2xl p-8 text-center shadow-2xl max-w-sm w-full mx-4"
+            className="relative bg-white dark:bg-[#1A1A1C] rounded-2xl p-8 text-center shadow-2xl max-w-sm w-full mx-4"
             initial={{ opacity: 0, scale: 0.8, y: -50 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: -50 }}
