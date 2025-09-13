@@ -84,7 +84,7 @@ class FreekassaPayment:
                 'o': order_id,               # order ID
                 's': signature,              # signature
                 'currency': currency,        # currency
-                'i': '1',                   # interface language (1 = auto)
+                #'i': '1',                   # interface language (1 = auto)
                 'lang': 'ru'                # language
             }
             
