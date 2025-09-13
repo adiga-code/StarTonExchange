@@ -16,7 +16,7 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "src"), // Исправлено для новой структуры
     },
-  },
+  }, 
   // Убираем root, так как теперь мы в папке frontend
   build: {
     outDir: "dist", // Исправлено - относительный путь
