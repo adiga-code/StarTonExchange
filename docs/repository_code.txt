@@ -1833,10 +1833,11 @@ async def get_payment_status(
             raise HTTPException(status_code=403, detail="Access denied")
         
         # If pending and has invoice_id, check with payment system
-        if transaction.status == "pending" and transaction.invoice_id:
-            robokassa = get_robokassa()
-            if robokassa:
-                payment_status = await robokassa.check_payment_status(transaction.invoice_id)
+        # If pending and has invoice_id, check with FreeKassa
+        if transaction.status == "pending" and transaction.invoice_id and transaction.payment_system == "freekassa":
+            freekassa = get_freekassa()
+            if freekassa:
+                payment_status = await freekassa.check_payment_status(transaction.invoice_id)
                 
                 if payment_status and payment_status['status'] == 'paid':
                     # Update transaction status
@@ -1852,6 +1853,11 @@ async def get_payment_status(
                         user_updates = {
                             "stars_balance": current_user.stars_balance + int(transaction.amount),
                             "total_stars_earned": current_user.total_stars_earned + int(transaction.amount)
+                        }
+                        await storage.update_user(current_user.id, user_updates)
+                    elif transaction.currency == "ton":
+                        user_updates = {
+                            "ton_balance": current_user.ton_balance + transaction.amount
                         }
                         await storage.update_user(current_user.id, user_updates)
                     
@@ -3196,158 +3202,6 @@ class Setting(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 ================================================================================
-FILE: backend\robokassa.py
-================================================================================
-
-import hashlib
-import hmac
-import urllib.parse
-from typing import Dict, Optional
-from decimal import Decimal
-import httpx
-import os
-
-class RobokassaPayment:
-    def __init__(self):
-        self.merchant_login = os.getenv('ROBOKASSA_MERCHANT_LOGIN')
-        self.password1 = os.getenv('ROBOKASSA_PASSWORD1')  # Для создания платежей
-        self.password2 = os.getenv('ROBOKASSA_PASSWORD2')  # Для проверки результата
-        self.test_mode = os.getenv('ROBOKASSA_TEST_MODE', 'true').lower() == 'true'
-        
-        if not all([self.merchant_login, self.password1, self.password2]):
-            raise ValueError("Robokassa credentials not configured")
-        
-        # URLs
-        if self.test_mode:
-            self.payment_url = "https://auth.robokassa.ru/Merchant/Index.aspx"
-            self.api_url = "https://auth.robokassa.ru/Merchant/WebService/Service.asmx"
-        else:
-            self.payment_url = "https://merchant.roboxchange.com/Index.aspx"
-            self.api_url = "https://merchant.roboxchange.com/WebService/Service.asmx"
-
-    def generate_signature(self, values: list, password: str) -> str:
-        """Generate MD5 signature for Robokassa"""
-        signature_string = ':'.join(str(v) for v in values)
-        return hashlib.md5(f"{signature_string}:{password}".encode('utf-8')).hexdigest().lower()
-
-    def create_payment_url(
-        self, 
-        invoice_id: str, 
-        amount: Decimal, 
-        description: str,
-        user_email: Optional[str] = None,
-        currency: str = "RUB"
-    ) -> str:
-        """Create payment URL for Robokassa"""
-        
-        # Required parameters
-        params = {
-            'MerchantLogin': self.merchant_login,
-            'OutSum': str(amount),
-            'InvId': invoice_id,
-            'Description': description,
-            'Culture': 'ru'
-        }
-        
-        # Optional parameters
-        if user_email:
-            params['Email'] = user_email
-            
-        if self.test_mode:
-            params['IsTest'] = '1'
-        
-        # Generate signature
-        signature_values = [
-            self.merchant_login,
-            amount,
-            invoice_id,
-            self.password1
-        ]
-        
-        params['SignatureValue'] = self.generate_signature(signature_values, "")
-        
-        # Build URL
-        query_string = urllib.parse.urlencode(params)
-        return f"{self.payment_url}?{query_string}"
-
-    def verify_payment_result(self, data: Dict) -> bool:
-        """Verify payment result from Robokassa webhook"""
-        try:
-            out_sum = data.get('OutSum')
-            inv_id = data.get('InvId')
-            signature = data.get('SignatureValue', '').lower()
-            
-            # Generate expected signature
-            signature_values = [out_sum, inv_id, self.password2]
-            expected_signature = self.generate_signature(signature_values, "")
-            
-            return hmac.compare_digest(signature, expected_signature)
-            
-        except Exception as e:
-            print(f"Error verifying payment: {e}")
-            return False
-
-    async def check_payment_status(self, invoice_id: str) -> Optional[Dict]:
-        """Check payment status via Robokassa API"""
-        try:
-            signature_values = [self.merchant_login, invoice_id, self.password2]
-            signature = self.generate_signature(signature_values, "")
-            
-            params = {
-                'MerchantLogin': self.merchant_login,
-                'InvoiceID': invoice_id,
-                'Signature': signature
-            }
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.api_url}/OpStateExt",
-                    data=params,
-                    timeout=30
-                )
-                
-                if response.status_code == 200:
-                    # Parse XML response (simplified)
-                    content = response.text
-                    if 'State>5<' in content:  # Status 5 = paid
-                        return {'status': 'paid', 'response': content}
-                    elif 'State>10<' in content:  # Status 10 = cancelled  
-                        return {'status': 'cancelled', 'response': content}
-                    else:
-                        return {'status': 'pending', 'response': content}
-                        
-            return None
-            
-        except Exception as e:
-            print(f"Error checking payment status: {e}")
-            return None
-
-    def get_available_payment_methods(self) -> list:
-        """Get available payment methods"""
-        return [
-            {'code': 'BankCard', 'name': 'Банковская карта'},
-            {'code': 'QIWI', 'name': 'QIWI Кошелек'},
-            {'code': 'WebMoney', 'name': 'WebMoney'},
-            {'code': 'YandexMoney', 'name': 'ЮMoney'},
-            {'code': 'Tinkoff', 'name': 'Тинькофф'},
-            {'code': 'SberBank', 'name': 'Сбербанк Онлайн'},
-        ]
-
-# Global instance
-robokassa = None
-
-def get_robokassa():
-    """Get Robokassa instance"""
-    global robokassa
-    if robokassa is None:
-        try:
-            robokassa = RobokassaPayment()
-        except ValueError as e:
-            print(f"Warning: Robokassa not configured: {e}")
-            robokassa = None
-    return robokassa
-
-================================================================================
 FILE: backend\run_dev.py
 ================================================================================
 
@@ -4391,275 +4245,6 @@ class TONPriceService:
 ton_price_service = TONPriceService()
 
 ================================================================================
-FILE: backend\webhooks.py
-================================================================================
-
-import os
-import logging
-import hashlib
-import hmac
-from typing import Dict, Any
-from datetime import datetime
-from decimal import Decimal
-
-from fastapi import APIRouter, HTTPException, Request, Depends
-from pydantic import BaseModel
-
-from database import AsyncSessionLocal
-from storage import Storage
-from schemas import FragmentWebhookData, RobokassaWebhookData
-
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/webhooks")
-
-async def get_storage():
-    async with AsyncSessionLocal() as session:
-        yield Storage(session)
-
-def verify_robokassa_signature(out_sum: str, inv_id: str, password: str, signature: str) -> bool:
-    """Проверить подпись Robokassa"""
-    try:
-        # Создать строку для подписи
-        sign_string = f"{out_sum}:{inv_id}:{password}"
-        # Вычислить MD5 хеш
-        calculated_signature = hashlib.md5(sign_string.encode()).hexdigest().upper()
-        return calculated_signature == signature.upper()
-    except Exception as e:
-        logger.error(f"Error verifying Robokassa signature: {e}")
-        return False
-
-def verify_fragment_signature(data: Dict[str, Any], bot_token: str) -> bool:
-    """Проверить подпись Fragment API"""
-    try:
-        # Fragment API использует HMAC-SHA256 с bot token
-        # Конкретная реализация зависит от документации Fragment API
-        # Здесь пример проверки
-        message = "|".join([str(v) for v in sorted(data.values()) if v is not None])
-        expected_signature = hmac.new(
-            bot_token.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
-        return expected_signature == data.get("signature", "")
-    except Exception as e:
-        logger.error(f"Error verifying Fragment signature: {e}")
-        return False
-
-@router.post("/robokassa")
-async def robokassa_webhook(
-    request: Request,
-    storage: Storage = Depends(get_storage)
-):
-    """Обработка webhook от Robokassa"""
-    try:
-        # Получить данные из формы
-        form_data = await request.form()
-        webhook_data = RobokassaWebhookData(
-            OutSum=form_data.get("OutSum", ""),
-            InvId=form_data.get("InvId", ""),
-            SignatureValue=form_data.get("SignatureValue", ""),
-            PaymentMethod=form_data.get("PaymentMethod"),
-            IncCurrLabel=form_data.get("IncCurrLabel")
-        )
-        
-        logger.info(f"Received Robokassa webhook: {webhook_data}")
-        
-        # Проверить подпись
-        password = os.getenv("ROBOKASSA_PASSWORD2", "")
-        if not verify_robokassa_signature(
-            webhook_data.OutSum,
-            webhook_data.InvId,
-            password,
-            webhook_data.SignatureValue
-        ):
-            logger.error("Invalid Robokassa signature")
-            raise HTTPException(status_code=400, detail="Invalid signature")
-        
-        # Найти транзакцию
-        transaction = await storage.get_transaction(webhook_data.InvId)
-        if not transaction:
-            logger.error(f"Transaction not found: {webhook_data.InvId}")
-            raise HTTPException(status_code=404, detail="Transaction not found")
-        
-        # Проверить сумму
-        expected_amount = float(transaction.rub_amount or 0)
-        received_amount = float(webhook_data.OutSum)
-        
-        if abs(expected_amount - received_amount) > 0.01:  # Допуск 1 копейка
-            logger.error(f"Amount mismatch: expected {expected_amount}, received {received_amount}")
-            raise HTTPException(status_code=400, detail="Amount mismatch")
-        
-        # Обновить статус транзакции
-        if transaction.status != "completed":
-            await storage.update_transaction(transaction.id, {
-                "status": "completed",
-                "paid_at": datetime.utcnow(),
-                "payment_data": webhook_data.dict()
-            })
-            
-            # Начислить валюту пользователю
-            if transaction.currency == "ton":
-                # Обновить баланс TON
-                user = await storage.get_user(transaction.user_id)
-                if user:
-                    new_balance = user.ton_balance + transaction.amount
-                    await storage.update_user(user.id, {"ton_balance": new_balance})
-            elif transaction.currency == "stars":
-                # Начислить звезды
-                await storage.add_user_stars(transaction.user_id, int(transaction.amount))
-            
-            # Обработать реферальный бонус
-            user = await storage.get_user(transaction.user_id)
-            if user and user.referred_by:
-                bonus_amount = int(float(transaction.amount) * 0.1)  # 10% бонус
-                await storage.process_referral_bonus(user.referred_by, bonus_amount)
-            
-            logger.info(f"Transaction {transaction.id} completed successfully")
-        
-        return {"status": "OK"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error processing Robokassa webhook: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.post("/fragment")
-async def fragment_webhook(
-    webhook_data: FragmentWebhookData,
-    storage: Storage = Depends(get_storage)
-):
-    """Обработка webhook от Fragment API"""
-    try:
-        logger.info(f"Received Fragment webhook: {webhook_data}")
-        
-        # Проверить подпись (если требуется)
-        bot_token = os.getenv("BOT_TOKEN", "")
-        # if bot_token and not verify_fragment_signature(webhook_data.dict(), bot_token):
-        #     logger.error("Invalid Fragment signature")
-        #     raise HTTPException(status_code=400, detail="Invalid signature")
-        
-        # Найти транзакцию
-        transaction = await storage.get_transaction(webhook_data.payment_id)
-        if not transaction:
-            logger.error(f"Transaction not found: {webhook_data.payment_id}")
-            raise HTTPException(status_code=404, detail="Transaction not found")
-        
-        # Обработать статус платежа
-        if webhook_data.status == "completed" and transaction.status != "completed":
-            # Проверить количество звезд
-            expected_stars = int(transaction.amount)
-            received_stars = webhook_data.stars
-            
-            if expected_stars != received_stars:
-                logger.error(f"Stars mismatch: expected {expected_stars}, received {received_stars}")
-                raise HTTPException(status_code=400, detail="Stars amount mismatch")
-            
-            # Обновить статус транзакции
-            await storage.update_transaction(transaction.id, {
-                "status": "completed",
-                "paid_at": datetime.utcnow(),
-                "payment_data": webhook_data.dict()
-            })
-            
-            # Начислить звезды пользователю
-            await storage.add_user_stars(transaction.user_id, webhook_data.stars)
-            
-            # Обработать реферальный бонус
-            user = await storage.get_user(transaction.user_id)
-            if user and user.referred_by:
-                bonus_amount = int(webhook_data.stars * 0.1)  # 10% бонус
-                await storage.process_referral_bonus(user.referred_by, bonus_amount)
-            
-            logger.info(f"Fragment transaction {transaction.id} completed successfully")
-            
-        elif webhook_data.status in ["failed", "cancelled"]:
-            # Обновить статус как неудачный
-            await storage.update_transaction(transaction.id, {
-                "status": webhook_data.status,
-                "payment_data": webhook_data.dict()
-            })
-            logger.info(f"Fragment transaction {transaction.id} {webhook_data.status}")
-        
-        return {"status": "OK"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error processing Fragment webhook: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.get("/test")
-async def test_webhook():
-    """Тестовый endpoint для проверки работы webhook'ов"""
-    return {"status": "Webhook service is running"}
-
-# Функции для создания платежей (будут использованы в main.py)
-
-async def create_robokassa_payment(
-    amount: Decimal,
-    description: str,
-    invoice_id: str
-) -> str:
-    """Создать платеж в Robokassa и вернуть URL"""
-    try:
-        # Параметры Robokassa
-        merchant_login = os.getenv("ROBOKASSA_LOGIN", "")
-        password1 = os.getenv("ROBOKASSA_PASSWORD1", "")
-        
-        if not merchant_login or not password1:
-            raise ValueError("Robokassa credentials not configured")
-        
-        # Создать подпись
-        sign_string = f"{merchant_login}:{amount}:{invoice_id}:{password1}"
-        signature = hashlib.md5(sign_string.encode()).hexdigest()
-        
-        # Создать URL для оплаты
-        base_url = "https://auth.robokassa.ru/Merchant/Index.aspx"
-        params = {
-            "MerchantLogin": merchant_login,
-            "OutSum": str(amount),
-            "InvId": invoice_id,
-            "Description": description,
-            "SignatureValue": signature,
-            "IsTest": "1" if os.getenv("DEVELOPMENT") else "0"
-        }
-        
-        query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-        payment_url = f"{base_url}?{query_string}"
-        
-        return payment_url
-        
-    except Exception as e:
-        logger.error(f"Error creating Robokassa payment: {e}")
-        raise
-
-async def create_fragment_payment(
-    stars: int,
-    amount: Decimal,
-    description: str,
-    invoice_id: str
-) -> str:
-    """Создать платеж в Fragment API и вернуть URL"""
-    try:
-        # Это упрощенная версия - реальная интеграция потребует API ключи Fragment
-        bot_token = os.getenv("BOT_TOKEN", "")
-        
-        if not bot_token:
-            raise ValueError("Bot token not configured")
-        
-        # В реальной версии здесь будет вызов Fragment API
-        # Пока возвращаем тестовый URL
-        fragment_url = f"https://fragment.com/pay?stars={stars}&amount={amount}&invoice={invoice_id}"
-        
-        return fragment_url
-        
-    except Exception as e:
-        logger.error(f"Error creating Fragment payment: {e}")
-        raise
-
-================================================================================
 FILE: backend\api\fragment.py
 ================================================================================
 
@@ -5086,7 +4671,7 @@ FILE: frontend\package-lock.json
   "packages": {  }
 }
 
- 
+
 ================================================================================
 FILE: frontend\package.json
 ================================================================================
@@ -5433,7 +5018,7 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "src"), // Исправлено для новой структуры
     },
-  },
+  }, 
   // Убираем root, так как теперь мы в папке frontend
   build: {
     outDir: "dist", // Исправлено - относительный путь
@@ -6186,10 +5771,13 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
     setIsProcessing(true);
     onShowLoading('Ожидаем оплату...');
 
-    const maxAttempts = 30;
+    const maxAttempts = 60; // Увеличиваем до 10 минут
+    const timeout = 10 * 60 * 1000; // 10 минут максимум
+    const startTime = Date.now();
     let attempts = 0;
 
     const checkStatus = async () => {
+
       try {
         const response = await apiRequest('GET', `/api/payment/status/${transactionId}`);
         const statusData = await response.json();
@@ -6202,7 +5790,7 @@ export default function BuyTab({ user, onShowLoading, onHideLoading }: BuyTabPro
 
           hapticFeedback('success');
           toast({
-            title: "Оплата успешна!",
+            title: "Оплата успешна!", 
             description: `${selectedCurrency === 'stars' ? 'Звезды' : 'TON'} добавлены на ваш счет`,
           });
           return;
@@ -6754,7 +6342,7 @@ export default function LoadingModal({ isOpen, message = "Загрузка..." }
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
           <motion.div
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             initial={{ opacity: 0 }}
@@ -6762,7 +6350,7 @@ export default function LoadingModal({ isOpen, message = "Загрузка..." }
             exit={{ opacity: 0 }}
           />
           <motion.div
-            className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-[#1A1A1C] rounded-2xl p-8 text-center shadow-2xl max-w-sm w-full mx-4"
+            className="relative bg-white dark:bg-[#1A1A1C] rounded-2xl p-8 text-center shadow-2xl max-w-sm w-full mx-4"
             initial={{ opacity: 0, scale: 0.8, y: -50 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: -50 }}
@@ -6791,7 +6379,6 @@ export default function LoadingModal({ isOpen, message = "Загрузка..." }
     </AnimatePresence>
   );
 }
-
 
 ================================================================================
 FILE: frontend\src\components\payment-method-modal.tsx
